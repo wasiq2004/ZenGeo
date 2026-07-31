@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Compressed pg_dump of the managed database into ./backups, with rotation.
+# Compressed pg_dump of the production database into ./backups, with rotation.
 #
-# Postgres is self-hosted on its own VPS, so there is no provider snapshot to
-# fall back on: this script IS the backup story, and nothing else is watching.
+# Postgres runs in a container on THIS box, so there is no provider snapshot and
+# no second machine holding a copy: this script IS the backup story, and nothing
+# else is watching. Losing this VPS loses the application and the data together.
 #
 #   0 3 * * * cd /opt/checkgeo && ./infra/backup/pg_backup.sh >> /var/log/checkgeo-backup.log 2>&1
 #
 # Set BACKUP_REMOTE to copy each dump off this machine as it is written. A
-# backup sitting on the same disk as the thing it backs up is not a backup - and
-# with two VPS boxes, "off the machine" means off BOTH of them, since losing the
-# app box loses these files just as surely as losing the database box.
+# backup sitting on the same disk as the thing it backs up is not a backup, and
+# here that is literally the same disk.
 #
 #   BACKUP_REMOTE=user@backup-host:/srv/checkgeo-backups
 #
@@ -21,10 +21,9 @@ cd "$(dirname "$0")/../.."
 
 BACKUP_DIR="${BACKUP_DIR:-./backups}"
 RETENTION_DAYS="${RETENTION_DAYS:-14}"
-COMPOSE="${COMPOSE:-docker compose}"
-# Must be >= the managed server's major version; pg_dump refuses to dump a newer
-# server than itself.
-PG_IMAGE="${PG_IMAGE:-postgres:16-alpine}"
+# Defaults to the production stack: this script is meant to run on the VPS.
+# Override for the dev stack: COMPOSE="docker compose -f docker-compose.yml"
+COMPOSE="${COMPOSE:-docker compose -f docker-compose.prod.yml}"
 STAMP="$(date -u +%Y-%m-%dT%H-%M-%SZ)"
 
 mkdir -p "$BACKUP_DIR"
@@ -37,21 +36,16 @@ fi
 DB_NAME="${POSTGRES_DB:-geo_audit}"
 TARGET="${BACKUP_DIR}/${DB_NAME}-${STAMP}.sql.gz"
 
-# There is no local postgres container any more, so the dump runs from a
-# throwaway client container pointed at the managed host. The owner role is used
-# because the runtime role deliberately cannot read everything.
-: "${POSTGRES_HOST:?POSTGRES_HOST is required}"
-: "${POSTGRES_USER:?POSTGRES_USER is required}"
-: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}"
-DUMP_DSN="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT:-5432}/${DB_NAME}?sslmode=${POSTGRES_SSLMODE:-require}"
+echo "[$(date -u +%FT%TZ)] Backing up ${DB_NAME} -> ${TARGET}"
 
-echo "[$(date -u +%FT%TZ)] Backing up ${DB_NAME} on ${POSTGRES_HOST} -> ${TARGET}"
-
+# pg_dump runs inside the postgres container, over its local socket, as the
+# owner role - the runtime role deliberately cannot read everything. Going
+# through the container means no client image to keep in step with the server
+# version, no credentials on the command line, and no TLS handshake to satisfy.
+#
 # --clean --if-exists makes the dump idempotent to restore over an existing DB.
-# The DSN goes in via the environment, never argv, so it cannot be read out of
-# `ps` by another user on the box.
-docker run --rm -i -e PGDSN="$DUMP_DSN" "$PG_IMAGE" \
-  sh -c 'pg_dump "$PGDSN" --clean --if-exists' \
+$COMPOSE exec -T postgres sh -c \
+  'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists' \
   | gzip -9 > "$TARGET.partial"
 
 # Only publish the final name once the dump completed, so a half-written file

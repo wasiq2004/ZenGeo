@@ -11,8 +11,9 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 DUMP="${1:-}"
-COMPOSE="${COMPOSE:-docker compose}"
-PG_IMAGE="${PG_IMAGE:-postgres:16-alpine}"
+# Defaults to the production stack: this script is meant to run on the VPS.
+# Override for the dev stack: COMPOSE="docker compose -f docker-compose.yml"
+COMPOSE="${COMPOSE:-docker compose -f docker-compose.prod.yml}"
 
 if [ -z "$DUMP" ]; then
   echo "Usage: $0 <path-to-dump.sql.gz>" >&2
@@ -32,15 +33,12 @@ if [ -f .env ]; then
   set -a; . ./.env; set +a
 fi
 
-: "${POSTGRES_HOST:?POSTGRES_HOST is required}"
-: "${POSTGRES_USER:?POSTGRES_USER is required}"
-: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}"
 DB_NAME="${POSTGRES_DB:-geo_audit}"
-RESTORE_DSN="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT:-5432}/${DB_NAME}?sslmode=${POSTGRES_SSLMODE:-require}"
 
-# The target is a managed instance now, so name it plainly - the whole point of
-# the confirmation is that you read which host you are about to overwrite.
-echo "This will OVERWRITE database '${DB_NAME}' on host '${POSTGRES_HOST}'."
+# Name the target plainly - the whole point of the confirmation is that you read
+# which database you are about to overwrite before agreeing to it.
+echo "This will OVERWRITE database '${DB_NAME}' in the stack managed by:"
+echo "  ${COMPOSE}"
 echo "Restoring from: $DUMP"
 printf "Type 'restore' to continue: "
 read -r CONFIRM
@@ -51,8 +49,10 @@ echo "Stopping backend and worker…"
 $COMPOSE stop backend worker
 
 echo "Restoring…"
-gzip -dc "$DUMP" | docker run --rm -i -e PGDSN="$RESTORE_DSN" "$PG_IMAGE" \
-  sh -c 'psql -v ON_ERROR_STOP=1 "$PGDSN"'
+# Fed into psql inside the postgres container over its local socket, as the
+# owner role - the same path the dump came out of.
+gzip -dc "$DUMP" | $COMPOSE exec -T postgres sh -c \
+  'PGPASSWORD="$POSTGRES_PASSWORD" psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
 
 echo "Bringing services back up…"
 $COMPOSE start backend worker

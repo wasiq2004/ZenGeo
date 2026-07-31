@@ -20,61 +20,14 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-Location -Path $PSScriptRoot
 
-$Compose = @('docker', 'compose')
-$ComposeProd = @('docker', 'compose', '-f', 'docker-compose.yml', '-f', 'docker-compose.prod.yml')
-# Postgres client for one-off work against the managed database. Joining the
-# compose network lets the same command reach the dev container by hostname.
-$PgImage = 'postgres:16-alpine'
-$PgNetwork = 'geo-audit_internal'
-
-# Reads .env into a hashtable, expanding ${VAR} references against values
-# defined earlier in the file - the same thing Docker Compose does when it
-# loads the file, so DATABASE_URL-style composed values resolve here too.
-function Read-DotEnv([string]$Path = '.env') {
-    $values = @{}
-    if (-not (Test-Path $Path)) { throw "$Path not found - copy .env.example and fill it in." }
-    foreach ($line in Get-Content $Path) {
-        $trimmed = $line.Trim()
-        if ($trimmed -eq '' -or $trimmed.StartsWith('#')) { continue }
-        $split = $trimmed.IndexOf('=')
-        if ($split -lt 1) { continue }
-        $key = $trimmed.Substring(0, $split).Trim()
-        $value = $trimmed.Substring($split + 1).Trim()
-        $value = [regex]::Replace($value, '\$\{(\w+)\}', {
-            param($m)
-            $name = $m.Groups[1].Value
-            if ($values.ContainsKey($name)) { $values[$name] } else { '' }
-        })
-        $values[$key] = $value
-    }
-    return $values
-}
-
-# libpq DSN for the owner role - used by psql and the role bootstrap.
-function Get-OwnerDsn {
-    $env_ = Read-DotEnv
-    foreach ($required in 'POSTGRES_HOST', 'POSTGRES_USER', 'POSTGRES_PASSWORD', 'POSTGRES_DB') {
-        if (-not $env_[$required]) { throw "$required is not set in .env" }
-    }
-    $port = if ($env_['POSTGRES_PORT']) { $env_['POSTGRES_PORT'] } else { '5432' }
-    # An explicit POSTGRES_SSLMODE always wins. Otherwise: the throwaway dev
-    # container serves plain TCP, so requiring TLS there just fails to connect;
-    # anything else is remote and must be encrypted.
-    $localHosts = @('postgres', 'localhost', '127.0.0.1', '::1')
-    $ssl = if ($env_['POSTGRES_SSLMODE']) {
-        $env_['POSTGRES_SSLMODE']
-    } elseif ($localHosts -contains $env_['POSTGRES_HOST']) {
-        'disable'
-    } else {
-        'require'
-    }
-    return @{
-        Dsn = "postgresql://$($env_['POSTGRES_USER']):$($env_['POSTGRES_PASSWORD'])@$($env_['POSTGRES_HOST']):$port/$($env_['POSTGRES_DB'])?sslmode=$ssl"
-        AppUser = $env_['APP_DB_USER']
-        AppPassword = $env_['APP_DB_PASSWORD']
-        Host_ = $env_['POSTGRES_HOST']
-    }
-}
+# Two standalone stacks - the production file is not an overlay, so it takes a
+# single -f. Do not combine them.
+$Compose = @('docker', 'compose', '-f', 'docker-compose.yml')
+$ComposeProd = @('docker', 'compose', '-f', 'docker-compose.prod.yml')
+# Postgres runs inside both stacks, so every database task goes through
+# `compose exec postgres` and talks over the container's local socket. There is
+# no host-side DSN to assemble any more, and nothing has to satisfy the
+# production server's TLS requirement to run psql.
 
 # Environment assignments whose value must never be echoed. The command is
 # printed so you can see what ran; a connection string with the database
@@ -113,13 +66,13 @@ GEO Audit task runner
     ps              Container status
     shell           Bash shell in the backend container
 
-  Database (external / managed Postgres)
-    db-bootstrap    ONE-TIME on first deploy: create the runtime role
+  Database (Postgres runs in Docker, in both stacks)
     migrate         alembic upgrade head
     revision "msg"  Autogenerate a migration
     seed-admin      Create/promote the first admin account
-    psql            psql session against the configured database
-    backup          Compressed pg_dump into .\backups
+    psql            psql session against the dev database
+    backup          Compressed pg_dump of the dev database into .\backups
+    db-bootstrap    Re-apply runtime-role grants (already run on first start)
 
   Quality
     test            Backend + frontend tests
@@ -128,15 +81,21 @@ GEO Audit task runner
     lint            ruff + mypy + tsc
     audit           pip-audit + npm audit
 
-  Production (run on the VPS)
-    prod-up         Start the production stack
-    prod-down       Stop it
-    prod-migrate    Apply migrations
+  Production (run on the VPS) - one command brings up everything
+    prod-up         Start db, cache, api, worker, ui and proxy; migrations and
+                    the first admin are applied by the one-shot 'init' service
+    prod-down       Stop it (volumes, and the database, are kept)
+    prod-ps         Container status
     prod-logs       Tail logs
+    prod-migrate    Apply migrations by hand
+    prod-seed-admin Create/promote the first admin by hand
+    prod-psql       psql session against the PRODUCTION database
+    prod-backup     Compressed pg_dump of the production database
 
   Danger
-    clean           Stop everything and DELETE local volumes
-                    (the LOCAL dev database only - the managed one is untouched)
+    clean           Stop everything and DELETE local volumes (the LOCAL dev
+                    database only - production uses a separate project name,
+                    so its database is not reachable from here)
 "@ | Write-Host
 }
 
@@ -208,41 +167,43 @@ switch ($Task) {
     'migrate'    { Invoke-Cmd ($Compose + @('exec', 'backend', 'alembic', 'upgrade', 'head')) }
     'revision'   { Invoke-Cmd ($Compose + @('exec', 'backend', 'alembic', 'revision', '--autogenerate', '-m', ($Rest -join ' '))) }
     'seed-admin' { Invoke-Cmd ($Compose + @('exec', 'backend', 'python', '-m', 'app.scripts.seed_admin')) }
+    # Postgres runs inside both stacks now, so these go through `compose exec`
+    # instead of a throwaway client container joined to the network by hand.
+    # That also means psql uses the container's local socket and never has to
+    # satisfy the server's TLS requirement.
+    # PGPASSWORD is needed even inside the container: POSTGRES_INITDB_ARGS sets
+    # --auth-local=scram-sha-256, so the Unix socket asks for a password too.
+    # It is read from the container's own environment, never passed in argv.
     'psql' {
-        $db = Get-OwnerDsn
-        Write-Host "Connecting to $($db.Host_)" -ForegroundColor DarkGray
-        # The DSN goes in through the environment, never argv, so it cannot be
-        # read out of the process list.
-        Invoke-Cmd @('docker', 'run', '--rm', '-it', '--network', $PgNetwork,
-            '-e', "PGDSN=$($db.Dsn)", $PgImage, 'sh', '-c', 'psql "$PGDSN"')
+        Invoke-Cmd ($Compose + @('exec', 'postgres', 'sh', '-c',
+            'PGPASSWORD="$POSTGRES_PASSWORD" psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'))
+    }
+    'prod-psql' {
+        Invoke-Cmd ($ComposeProd + @('exec', 'postgres', 'sh', '-c',
+            'PGPASSWORD="$POSTGRES_PASSWORD" psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'))
     }
     'db-bootstrap' {
-        $db = Get-OwnerDsn
-        if (-not $db.AppUser -or -not $db.AppPassword) {
-            throw 'APP_DB_USER and APP_DB_PASSWORD must be set in .env before bootstrapping.'
-        }
-        Write-Host "Creating the least-privilege runtime role on $($db.Host_)" -ForegroundColor Cyan
-        Invoke-Cmd @('docker', 'run', '--rm', '-i', '--network', $PgNetwork,
-            '-e', "PGDSN=$($db.Dsn)",
-            '-e', "APP_DB_USER=$($db.AppUser)", '-e', "APP_DB_PASSWORD=$($db.AppPassword)",
-            # Forward slashes so the Windows path survives Docker's own parsing
-            # of the colon-delimited -v argument.
-            '-v', "$($PWD.Path -replace '\\', '/')/infra/postgres/bootstrap:/bootstrap:ro",
-            $PgImage, 'sh', '-c',
-            'psql "$PGDSN" -v app_user="$APP_DB_USER" -v app_password="$APP_DB_PASSWORD" -f /bootstrap/10-roles.sql')
+        Write-Host 'Re-applying the runtime-role grants (already applied on first start).' -ForegroundColor Cyan
+        Invoke-Cmd ($Compose + @('exec', 'postgres', 'sh', '-c',
+            'PGPASSWORD="$POSTGRES_PASSWORD" psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v app_user="$APP_DB_USER" -v app_password="$APP_DB_PASSWORD" -f /bootstrap/10-roles.sql'))
     }
-    'backup' {
+    { $_ -in 'backup', 'prod-backup' } {
+        # pg_dump runs inside the postgres container over its local socket, so
+        # no client image and no TLS negotiation are involved.
+        $stack = if ($Task -eq 'prod-backup') { $ComposeProd } else { $Compose }
+        $which = if ($Task -eq 'prod-backup') { 'production' } else { 'development' }
         New-Item -ItemType Directory -Force -Path 'backups' | Out-Null
-        $db = Get-OwnerDsn
         $stamp = Get-Date -Format 'yyyy-MM-dd-HHmmss'
-        $file = "backups/geo_audit-$stamp.sql"
-        Write-Host "Dumping $($db.Host_)" -ForegroundColor DarkGray
-        docker run --rm -i --network $PgNetwork -e "PGDSN=$($db.Dsn)" $PgImage `
-            sh -c 'pg_dump "$PGDSN" --clean --if-exists' | Set-Content -Path $file -Encoding utf8
+        $file = "backups/geo_audit-$which-$stamp.sql"
+        Write-Host "Dumping the $which database" -ForegroundColor DarkGray
+        & $stack[0] @($stack[1..($stack.Length - 1)]) exec -T postgres sh -c `
+            'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists' `
+            | Set-Content -Path $file -Encoding utf8
         if ($LASTEXITCODE -ne 0) { throw "pg_dump failed with exit code $LASTEXITCODE" }
         Compress-Archive -Path $file -DestinationPath "$file.zip" -Force
         Remove-Item $file
         Write-Host "Wrote $file.zip" -ForegroundColor Green
+        Write-Host 'A dump on the same machine as the database is not a backup - copy it off the box.' -ForegroundColor Yellow
     }
 
     'test'          { Invoke-Cmd ($Compose + @('exec', 'backend', 'pytest', '-q')); Invoke-Cmd ($Compose + @('exec', 'frontend', 'npm', 'run', 'test')) }
@@ -258,10 +219,17 @@ switch ($Task) {
         Invoke-Cmd ($Compose + @('exec', 'frontend', 'npm', 'run', 'audit:check'))
     }
 
-    'prod-up'      { Invoke-Cmd ($ComposeProd + @('up', '-d', '--build')) }
-    'prod-down'    { Invoke-Cmd ($ComposeProd + @('down')) }
-    'prod-migrate' { Invoke-Cmd ($ComposeProd + @('exec', 'backend', 'alembic', 'upgrade', 'head')) }
-    'prod-logs'    { Invoke-Cmd ($ComposeProd + @('logs', '-f', '--tail=120') + $Rest) }
+    'prod-up' {
+        Invoke-Cmd ($ComposeProd + @('up', '-d', '--build'))
+        Write-Host ''
+        Write-Host "Migrations and the first admin are applied by the one-shot 'init' service." -ForegroundColor Green
+        Write-Host 'Watch it with: .\geo.ps1 prod-logs init' -ForegroundColor Green
+    }
+    'prod-down'       { Invoke-Cmd ($ComposeProd + @('down')) }
+    'prod-ps'         { Invoke-Cmd ($ComposeProd + @('ps')) }
+    'prod-migrate'    { Invoke-Cmd ($ComposeProd + @('exec', 'backend', 'alembic', 'upgrade', 'head')) }
+    'prod-seed-admin' { Invoke-Cmd ($ComposeProd + @('exec', 'backend', 'python', '-m', 'app.scripts.seed_admin')) }
+    'prod-logs'       { Invoke-Cmd ($ComposeProd + @('logs', '-f', '--tail=120') + $Rest) }
 
     'clean' {
         Write-Host 'This deletes the LOCAL dev database, Redis data and stored PDF reports.' -ForegroundColor Red

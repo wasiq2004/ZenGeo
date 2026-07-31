@@ -1,19 +1,63 @@
-# Base stack. `docker compose up` also applies docker-compose.override.yml
-# (local development). For the VPS use:
-#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# =============================================================================
+# LOCAL DEVELOPMENT stack - standalone. Hot reload, bind-mounted source,
+# host-only debug ports, and a throwaway Postgres container.
 #
-# Note: the reverse proxy is Caddy rather than Nginx - on a single VPS it gets
-# automatic Let's Encrypt TLS with a three-line config (spec section 11).
+#   docker compose up -d --build          (or: make up / .\geo.ps1 up)
 #
-# Postgres is deliberately NOT a service here: the database is an external
-# managed instance reached over TLS via DATABASE_URL. Redis stays local because
-# it holds only rate-limit counters and the Celery queue - nothing whose loss
-# outlives a restart. Local development gets a throwaway Postgres container from
-# docker-compose.override.yml; production has no postgres service at all.
+# Everything is served from one origin: http://localhost:8080
+#
+# Production is a separate, equally standalone file - it does NOT layer on top
+# of this one:
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Neither file includes the other, so a deploy tool that accepts only a single
+# compose file can be pointed straight at the production one. The trade is that
+# anything which must be true in both places has to be written in both places;
+# when you change a service here, check whether prod needs the same edit.
+# =============================================================================
 
 name: geo-audit
 
 services:
+  # Throwaway local database. Production runs its own Postgres container from
+  # docker-compose.prod.yml, under a different project name, so these volumes
+  # and those ones can never be confused for each other. Treat this data as
+  # disposable; `docker compose down -v` is a supported way to reset it.
+  #
+  # Unlike production this one serves plain TCP (no TLS) and the app connects
+  # with POSTGRES_SSLMODE=disable - the traffic never leaves your machine, and
+  # the production config check that forbids that only applies when
+  # ENVIRONMENT=production.
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      APP_DB_USER: ${APP_DB_USER}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD}
+      # Scrypt is the modern default; keeps password hashes strong at rest.
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Runs the same role-bootstrap SQL the production stack runs, so dev and
+      # production end up with identical privileges.
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+      - ./infra/postgres/bootstrap:/bootstrap:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    ports:
+      # Bound to 127.0.0.1 so the database is reachable from a local psql/GUI
+      # but never from the network.
+      - "127.0.0.1:5432:5432"
+    networks: [internal]
+
   redis:
     image: redis:7-alpine
     restart: unless-stopped
@@ -25,23 +69,47 @@ services:
       interval: 10s
       timeout: 3s
       retries: 10
+    ports:
+      - "127.0.0.1:6379:6379"
     networks: [internal]
 
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      args:
+        # Pulls in requirements-dev.txt: pytest, ruff, mypy.
+        INSTALL_DEV: "true"
     restart: unless-stopped
     env_file: [.env]
     environment:
-      # POSTGRES_HOST intentionally not set here - it comes from .env and points
-      # at the managed instance. Only the dev override redirects it to a container.
+      ENVIRONMENT: development
+      LOG_FORMAT: console
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
+      # Point at the throwaway container rather than whatever POSTGRES_HOST in
+      # .env says. The DSN is rebuilt from these components, so any DATABASE_URL
+      # in .env must be left unset for local development (see .env.example).
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_SSLMODE: disable
+    # uvicorn --reload instead of the image's gunicorn CMD.
+    command:
+      - uvicorn
+      - app.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --reload
+      - --reload-dir
+      - /app/app
     volumes:
+      - ./backend:/app
       - reports_data:/data/reports
     depends_on:
+      postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
@@ -49,6 +117,8 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+    ports:
+      - "127.0.0.1:8000:8000"
     networks: [internal]
 
   worker:
@@ -56,39 +126,57 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      args:
+        INSTALL_DEV: "true"
     restart: unless-stopped
     env_file: [.env]
     environment:
+      ENVIRONMENT: development
+      LOG_FORMAT: console
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_SSLMODE: disable
+    # Solo pool + no prefetch makes worker logs readable while developing.
+    # Deliberately no healthcheck here: under --pool=solo, `celery inspect ping`
+    # queues behind the task being executed, so a long audit would show the
+    # container as unhealthy while it is working perfectly. Production uses the
+    # prefork pool and does have one.
     command:
       - celery
       - -A
       - app.worker.celery_app.celery_app
       - worker
       - --loglevel=info
-      - --concurrency=4
-      - --max-tasks-per-child=50
+      - --pool=solo
     volumes:
+      - ./backend:/app
       - reports_data:/data/reports
     depends_on:
+      postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
-    healthcheck:
-      test: ["CMD-SHELL", "celery -A app.worker.celery_app.celery_app inspect ping -d celery@$$HOSTNAME || exit 1"]
-      interval: 60s
-      timeout: 15s
-      retries: 3
-      start_period: 40s
     networks: [internal]
 
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-      args:
-        VITE_API_BASE_URL: /api/v1
+    # Vite dev server, so there is no `build:` here at all - the frontend
+    # Dockerfile produces the static nginx image, which is a production
+    # artifact. (Keeping both `image:` and `build:` on this service is what made
+    # `docker compose build` tag the production frontend image as
+    # `node:22-alpine` and overwrite the base image in the local cache.)
+    image: node:22-alpine
     restart: unless-stopped
+    working_dir: /app
+    environment:
+      VITE_API_BASE_URL: /api/v1
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
+    volumes:
+      - ./frontend:/app
+      # Anonymous volume keeps Linux-native node_modules out of the Windows mount.
+      - /app/node_modules
+    ports:
+      - "127.0.0.1:5173:5173"
     networks: [internal]
 
   caddy:
@@ -96,19 +184,24 @@ services:
     restart: unless-stopped
     depends_on: [backend, frontend]
     volumes:
-      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./infra/caddy/Caddyfile.dev:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
-    networks: [internal, edge]
+    ports:
+      # Single same-origin entrypoint for development: http://localhost:8080.
+      # Hitting Vite on :5173 directly also works, but then the refresh cookie
+      # is cross-origin and silently will not fire.
+      - "127.0.0.1:8080:8080"
+    networks: [internal]
 
 volumes:
+  postgres_data:
   redis_data:
   reports_data:
   caddy_data:
   caddy_config:
 
 networks:
-  # Nothing on `internal` is published to the host.
+  # Development publishes its ports to 127.0.0.1 directly, so there is no
+  # separate edge network here - production has one.
   internal:
-  # Only the proxy joins `edge`, which is the network with published ports.
-  edge:

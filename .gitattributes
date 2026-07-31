@@ -1,0 +1,32 @@
+# Line endings.
+#
+# Anything a Linux container executes or parses must be LF, on every checkout,
+# whatever core.autocrlf says locally. A CRLF shebang makes the kernel look for
+# an interpreter literally named "/bin/bash\r", and the script dies with
+# "required file not found" - which is exactly how the Postgres role bootstrap
+# silently failed to create the runtime role.
+#
+# This matters even though git stores LF in the index: copying the working tree
+# to the server (scp/rsync, or a deploy tool that ships the local directory
+# rather than doing a clone) carries the CRLF along with it.
+* text=auto eol=lf
+
+# Windows-only runners keep native endings - nothing on Linux reads them.
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Binaries must never be touched.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.webp binary
+*.pdf  binary
+*.woff binary
+*.woff2 binary
+*.ttf  binary
+*.eot  binary
+*.zip  binary
+*.gz   binary

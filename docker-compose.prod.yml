@@ -1,28 +1,194 @@
-# Production overlay for a single VPS.
+# =============================================================================
+# PRODUCTION stack for a single VPS - standalone, and fully self-contained:
+# database, cache, API, worker, frontend and TLS proxy all run here. One
+# command brings the whole thing up, migrations and first admin included:
 #
-#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#   docker compose -f docker-compose.prod.yml up -d --build
 #
-# Adds: published 80/443, resource limits, read-only root filesystems, dropped
-# capabilities, no new privileges, and log rotation.
+# (or: make prod-up / .\geo.ps1 prod-up)
+#
+# This file does NOT layer on top of docker-compose.yml - it repeats everything
+# it needs, so a deploy tool that accepts only a single compose file can be
+# pointed straight at it. The trade is duplication: when you change a service in
+# docker-compose.yml, check whether this file needs the same edit.
+#
+# Adds over development: published 80/443, resource limits, read-only root
+# filesystems, dropped capabilities, no new privileges, and log rotation.
+#
+# ---------------------------------------------------------------------------
+# The database runs HERE, in a container, on this box.
+#
+# That is a deliberate trade for one-command deployment, and it costs you the
+# things a separate database host was buying:
+#   * Losing this VPS loses the application AND the data with it. Backups are
+#     no longer a nice-to-have - set BACKUP_REMOTE and run infra/backup/pg_backup.sh
+#     on a cron, or you have no recovery story at all.
+#   * `docker compose down -v` here deletes the production database. The project
+#     name below is deliberately different from the development stack's so that
+#     a stray dev-file command cannot reach these volumes.
+# ---------------------------------------------------------------------------
+#
+# The reverse proxy is Caddy rather than Nginx - on a single VPS it gets
+# automatic Let's Encrypt TLS with a three-line config (spec section 11).
+#
+# Requires a populated .env in this directory (see .env.example). Point the
+# domain's A record at this box BEFORE the first start, or Caddy's initial
+# certificate order fails.
+# =============================================================================
 
-# There is no `postgres` service: production connects to an external managed
-# Postgres over TLS (DATABASE_URL). Nothing here should ever reintroduce one -
-# a container on the same box would quietly become the real database.
+# Deliberately NOT "geo-audit": that is the development project name, and both
+# stacks declare a `postgres_data` volume. Sharing a project name would mean
+# `docker compose down -v` run against the development file on this box wipes
+# the production database.
+name: geo-audit-prod
+
+x-logging: &logging
+  driver: json-file
+  options: {max-size: "10m", max-file: "5"}
+
+# The API, the worker and the one-shot init job are the same image with the same
+# environment - only the command differs.
+x-backend-env: &backend-env
+  ENVIRONMENT: production
+  LOG_FORMAT: json
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: "5432"
+  # The hop to Postgres never leaves this box, but the application refuses to
+  # start in production on anything weaker than `require`, and encrypting a
+  # loopback-equivalent hop costs nothing. The server below serves TLS with a
+  # self-signed certificate, which is exactly what `require` expects: encrypt,
+  # do not verify the chain.
+  POSTGRES_SSLMODE: require
+  REDIS_URL: redis://redis:6379/0
+  CELERY_BROKER_URL: redis://redis:6379/1
+  CELERY_RESULT_BACKEND: redis://redis:6379/2
 
 services:
+  postgres:
+    # Debian rather than -alpine: this image ships the openssl binary, which the
+    # command below needs to mint the server certificate. Do not point an
+    # existing alpine PGDATA at this image - musl and glibc sort text
+    # differently and the indexes would be subtly wrong.
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env}
+      # Consumed by the init hooks below to create the least-privilege role and
+      # to rewrite pg_hba.conf so plain-TCP connections are refused outright.
+      # The development stack leaves REQUIRE_TLS unset, because its Postgres
+      # serves no TLS at all.
+      APP_DB_USER: ${APP_DB_USER}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD}
+      REQUIRE_TLS: "true"
+      # Scrypt is the modern default; keeps password hashes strong at rest.
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
+    # Generate a self-signed server certificate on first boot, then hand off to
+    # the stock entrypoint with TLS switched on. The certificate lives on its own
+    # volume rather than in PGDATA, because initdb refuses to initialise a data
+    # directory that already has files in it.
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        if [ ! -f /certs/server.key ]; then
+          openssl req -new -x509 -days 3650 -nodes \
+            -out /certs/server.crt -keyout /certs/server.key -subj "/CN=postgres"
+        fi
+        chown postgres:postgres /certs/server.crt /certs/server.key
+        chmod 600 /certs/server.key
+        exec docker-entrypoint.sh postgres \
+          -c ssl=on \
+          -c ssl_cert_file=/certs/server.crt \
+          -c ssl_key_file=/certs/server.key
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - postgres_certs:/certs
+      # Creates the least-privilege runtime role on first start, so the manual
+      # bootstrap step a managed provider would have needed is not required.
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+      - ./infra/postgres/bootstrap:/bootstrap:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    # Deliberately no `ports:` - the database is reachable only from this
+    # compose network. Use `docker compose -f docker-compose.prod.yml exec
+    # postgres psql` for a session; do not publish 5432.
+    shm_size: 256mb
+    deploy:
+      resources:
+        limits: {cpus: "1.5", memory: 1g}
+    logging: *logging
+    networks: [internal]
+
   redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "no", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
     security_opt: ["no-new-privileges:true"]
     deploy:
       resources:
         limits: {cpus: "0.5", memory: 384m}
-    logging: &logging
-      driver: json-file
-      options: {max-size: "10m", max-file: "5"}
+    logging: *logging
+    networks: [internal]
+
+  # One-shot job: applies migrations, then creates or promotes the first admin.
+  # backend and worker wait for it to exit 0, so a single `up` yields a working
+  # login rather than an empty schema. Both steps are idempotent, so it is safe
+  # that this re-runs on every deploy.
+  init:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: "no"
+    env_file: [.env]
+    environment: *backend-env
+    command:
+      - sh
+      - -c
+      - alembic upgrade head && python -m app.scripts.seed_admin
+    depends_on:
+      postgres: {condition: service_healthy}
+    read_only: true
+    tmpfs: ["/tmp:size=64m"]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    logging: *logging
+    networks: [internal]
 
   backend:
-    environment:
-      ENVIRONMENT: production
-      LOG_FORMAT: json
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      # INSTALL_DEV deliberately unset - the image defaults it to false, so
+      # pytest/ruff/mypy stay out of the production image.
+    restart: unless-stopped
+    env_file: [.env]
+    environment: *backend-env
+    volumes:
+      - reports_data:/data/reports
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      init: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     read_only: true
     tmpfs: ["/tmp:size=64m"]
     security_opt: ["no-new-privileges:true"]
@@ -31,11 +197,36 @@ services:
       resources:
         limits: {cpus: "1.5", memory: 1g}
     logging: *logging
+    networks: [internal]
 
   worker:
-    environment:
-      ENVIRONMENT: production
-      LOG_FORMAT: json
+    # Same image as the backend - only the command differs.
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: [.env]
+    environment: *backend-env
+    command:
+      - celery
+      - -A
+      - app.worker.celery_app.celery_app
+      - worker
+      - --loglevel=info
+      - --concurrency=4
+      - --max-tasks-per-child=50
+    volumes:
+      - reports_data:/data/reports
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      init: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.worker.celery_app.celery_app inspect ping -d celery@$$HOSTNAME || exit 1"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 40s
     read_only: true
     # WeasyPrint writes font caches to /tmp while rendering the PDF.
     tmpfs: ["/tmp:size=256m"]
@@ -45,28 +236,65 @@ services:
       resources:
         limits: {cpus: "2", memory: 1500m}
     logging: *logging
+    networks: [internal]
 
   frontend:
+    # Static SPA build served by nginx. The API base URL is baked in at build
+    # time, so changing it means a rebuild, not a restart.
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: /api/v1
+    restart: unless-stopped
     security_opt: ["no-new-privileges:true"]
+    # No cap_drop here: nginx binds :80 inside the container as the unprivileged
+    # nginx user, which needs the default capability set to stay intact.
     deploy:
       resources:
         limits: {cpus: "0.5", memory: 256m}
     logging: *logging
+    networks: [internal]
 
   caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on: [backend, frontend]
+    environment:
+      # `:?` fails the command with this message rather than starting Caddy with
+      # a blank domain - which would silently serve nothing and never obtain a
+      # certificate.
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:?set PUBLIC_DOMAIN in .env}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
+    volumes:
+      - ./infra/caddy/Caddyfile.prod:/etc/caddy/Caddyfile:ro
+      # caddy_data holds the issued certificates - losing it means re-ordering
+      # them from Let's Encrypt, against a rate limit. Keep the volume.
+      - caddy_data:/data
+      - caddy_config:/config
     ports:
       - "80:80"
       - "443:443"
       - "443:443/udp"   # HTTP/3
-    environment:
-      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN}
-      ACME_EMAIL: ${ACME_EMAIL}
-    volumes:
-      - ./infra/caddy/Caddyfile.prod:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
     security_opt: ["no-new-privileges:true"]
     deploy:
       resources:
         limits: {cpus: "0.5", memory: 256m}
     logging: *logging
+    networks: [internal, edge]
+
+volumes:
+  # postgres_data is the production database. Nothing else on this box should
+  # ever be allowed to remove it - see the project-name note at the top.
+  postgres_data:
+  postgres_certs:
+  redis_data:
+  reports_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  # Nothing on `internal` is published to the host.
+  internal:
+  # Only the proxy joins `edge`, which is the network with published ports.
+  edge:

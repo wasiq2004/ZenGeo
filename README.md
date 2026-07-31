@@ -54,21 +54,35 @@ rather than being silently capped at 85. The report says so explicitly.
 
 ## Database
 
-**Postgres is external.** There is no `postgres` service in `docker-compose.yml`
-or in the production overlay — the app connects out to a database on another
-host over TLS. Redis stays local in Docker, because it holds only rate-limit
-counters and the Celery queue: nothing whose loss needs to outlive a restart.
+**Postgres runs in Docker, in both stacks.** `docker compose up` starts the
+database alongside everything else — there is nothing external to provision and
+nothing to point at. Redis is local for the same reason it always was: it holds
+only rate-limit counters and the Celery queue, nothing whose loss needs to
+outlive a restart.
 
-That host can be a managed provider or a second VPS you run yourself. If you are
-self-hosting it, read [Self-hosted database VPS](#self-hosted-database-vps) —
-server TLS, `pg_hba.conf`, the firewall and backups all become your job, and
-`POSTGRES_SSLMODE=require` will simply fail to connect until the server is
-actually offering TLS.
+The production database is a container **on the application box**, and that
+trade has a price worth stating plainly:
 
-Local development is the one exception. `docker-compose.override.yml` — which
-plain `docker compose up` applies automatically — adds a throwaway Postgres
-container so contributors never point a dev environment at the production
-database. Production passes `-f` flags explicitly and never loads that file.
+- Losing the VPS loses the application *and* the data together. Backups stop
+  being optional — see [Backups and restore](#backups-and-restore), and set
+  `BACKUP_REMOTE` so dumps leave the machine.
+- `docker compose down -v` deletes the production database. The two stacks use
+  different Compose **project names** (`geo-audit` for development,
+  `geo-audit-prod` for production) precisely so a command aimed at the
+  development file can never reach production's volumes.
+
+In production the Postgres container mints a self-signed certificate on first
+boot, serves TLS, and rewrites `pg_hba.conf` so unencrypted TCP is refused
+outright — `sslmode=require` (encrypt, do not verify the chain) is exactly the
+right client mode against it. The development container serves plain TCP and its
+app connects with `sslmode=disable`; that traffic never leaves your machine.
+
+If you would rather use a managed provider, nothing stops you: set
+`DATABASE_URL` and `MIGRATIONS_DATABASE_URL` in `.env`, point them at the
+provider with TLS requested, and remove the `postgres` service from
+`docker-compose.prod.yml`. [Self-hosted database VPS](#self-hosted-database-vps)
+remains as the runbook for running Postgres on a **separate** box, which is the
+right move once the data outgrows sharing a disk with the app.
 
 ### Two roles, least privilege
 
@@ -86,11 +100,14 @@ psql "$DATABASE_URL_LIBPQ" -c 'create table nope(id int)'
 # ERROR:  permission denied for schema public
 ```
 
-### First deploy: create the runtime role by hand
+### The runtime role is created automatically
 
-Managed providers do not run `docker-entrypoint-initdb.d`, so this is a
-deliberate one-time manual step rather than something that happens on boot. Run
-it once, connected as the owner, before the first `alembic upgrade head`:
+Both stacks run Postgres in a container, so the image's
+`docker-entrypoint-initdb.d` hook does this on the first start of a fresh data
+volume — there is no manual bootstrap step on first deploy any more.
+
+Because that hook only fires on an empty data directory, editing the SQL has no
+effect on a database that already exists. Re-apply it by hand in that case:
 
 ```bash
 make db-bootstrap          # or: .\geo.ps1 db-bootstrap
@@ -326,8 +343,8 @@ a usage restriction.
 
 ## Deploying to a VPS
 
-One box running Docker Compose, plus a managed Postgres instance the box
-connects out to.
+One box running Docker Compose. Everything — Postgres, Redis, the API, the
+worker, the built frontend and the TLS proxy — runs there, from a single file.
 
 ### Sizing
 
@@ -356,23 +373,29 @@ cd /opt/checkgeo
 cp .env.example .env
 # Edit .env: set ENVIRONMENT=production, PUBLIC_DOMAIN, ACME_EMAIL,
 # FRONTEND_URL=https://your-domain, CORS_ORIGINS=https://your-domain,
-# the managed POSTGRES_* values with POSTGRES_SSLMODE=require,
-# and freshly generated secrets.
+# RESEND_API_KEY, MAIL_FROM, and freshly generated secrets.
+# The POSTGRES_* values create the database container - leave POSTGRES_HOST
+# as "postgres" and just set strong passwords.
 
-# ONE TIME: create the least-privilege runtime role on the managed database.
-make db-bootstrap
+# That is the whole deploy. It builds the images, starts Postgres, Redis, the
+# API, the worker, the frontend and Caddy, and a one-shot `init` service
+# applies the migrations and creates the first admin.
+docker compose -f docker-compose.prod.yml up -d --build
 
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
-docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backend alembic upgrade head
-docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backend python -m app.scripts.seed_admin
+# Watch the one-shot job if you want to see the migrations land:
+docker compose -f docker-compose.prod.yml logs -f init
 ```
 
-Point an A record at the VPS **before** the first start — Caddy obtains a Let's
-Encrypt certificate on boot and needs the domain to resolve.
+Point an A record at the domain **before** the first start — Caddy obtains a
+Let's Encrypt certificate on boot and needs the domain to resolve.
 
-Allowlist the VPS's outbound IP at your database provider, and keep the database
-off the public internet otherwise. If the provider offers a private network in
-the same region, use it: it is both faster and one less thing exposed.
+The database is not published to the host: it is reachable only from the Compose
+network. Do not add a `ports:` entry for it. For a session, go through the
+container:
+
+```bash
+make prod-psql             # or: .\geo.ps1 prod-psql
+```
 
 The app refuses to start in production with placeholder secrets, a plain-HTTP
 `FRONTEND_URL`, or `ALLOW_PRIVATE_NETWORK_FETCH=true`. That is deliberate: those
@@ -405,19 +428,27 @@ configured DSN.
 cd /opt/checkgeo
 ./infra/backup/pg_backup.sh        # or rely on your provider's snapshot
 git pull
-docker compose -f docker-compose.yml -f docker-compose.prod.yml build
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
-docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backend alembic upgrade head
+docker compose -f docker-compose.prod.yml build
+docker compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
 ```
 
 ---
 
 ## Self-hosted database VPS
 
-Running Postgres yourself instead of on a managed provider means five things
-nobody else is doing for you. Work through them **on the database box** before
-pointing the app at it. Throughout: `APP_VPS_IP` is the application server's
-address, `DB_VPS_IP` is this one's.
+> **Not the default any more.** The production stack runs Postgres in a
+> container on the application box, and nothing in this section is required to
+> deploy. Keep it for the day the database should move to its own machine —
+> because it has outgrown sharing a disk with the app, or because you want
+> losing one box to stop meaning losing both. Moving is: stand up the box below,
+> restore a dump into it, point `DATABASE_URL` / `MIGRATIONS_DATABASE_URL` at
+> it, and delete the `postgres` service from `docker-compose.prod.yml`.
+
+Running Postgres yourself on a separate box means five things nobody else is
+doing for you. Work through them **on the database box** before pointing the app
+at it. Throughout: `APP_VPS_IP` is the application server's address, `DB_VPS_IP`
+is this one's.
 
 ### 1. Server-side TLS
 
@@ -507,7 +538,7 @@ make db-bootstrap            # or: .\geo.ps1 db-bootstrap
 Then apply migrations and confirm the privilege split took:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backend alembic upgrade head
+docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
 make psql -c 'create table nope(id int)'   # as geo_runtime: permission denied
 ```
 
@@ -546,25 +577,29 @@ crontab -e
           ./infra/backup/pg_backup.sh >> /var/log/checkgeo-backup.log 2>&1
 ```
 
-Run it from the **app VPS**: it already holds the credentials and the network
-path to the database, and keeping dumps off the database box is the point.
+Run it on the VPS. It defaults to the production stack
+(`docker compose -f docker-compose.prod.yml`); override `COMPOSE` to dump the
+development one instead.
 
-The script dumps through a throwaway `postgres:16-alpine` client container using
-the owner credentials from `.env`, writes a compressed `pg_dump` plus a tarball
-of stored PDF reports into `./backups`, prunes anything older than
+`pg_dump` runs **inside** the Postgres container over its local socket, using
+the owner credentials already in that container's environment — no client image
+to keep in step with the server version, no credentials on the command line, no
+TLS handshake to satisfy. The script writes a compressed dump plus a tarball of
+stored PDF reports into `./backups`, prunes anything older than
 `RETENTION_DAYS` (default 14), and only publishes the final filename once the
 dump completes — so an interrupted run cannot leave a half-written file that
 looks like a good backup.
 
-**Set `BACKUP_REMOTE`.** With two VPS boxes, "off the machine" has to mean off
-*both* of them: dumps written on the app VPS die with the app VPS just as surely
-as ones on the database VPS. `BACKUP_REMOTE` is an `rsync`/`scp` destination and
-a failed copy fails the whole run, so cron mails you — a backup that quietly
-stopped replicating looks identical to a working one until the day you need it.
-Without it the script still runs, but warns loudly.
+**Set `BACKUP_REMOTE`.** This matters more than it used to: the database is now
+a container on this same box, so a dump in `./backups` sits on the same disk as
+the thing it backs up. Losing the VPS loses the application, the database and
+every local backup in one stroke. `BACKUP_REMOTE` is an `rsync`/`scp`
+destination and a failed copy fails the whole run, so cron mails you — a backup
+that quietly stopped replicating looks identical to a working one until the day
+you need it. Without it the script still runs, but warns loudly.
 
-**PDF reports are not in the database.** They live on a Docker volume on the app
-VPS, which is why the script tars them separately. A database-only backup
+**PDF reports are not in the database.** They live on a separate Docker volume,
+which is why the script tars them separately. A database-only backup
 restores every audit's scores and loses every generated report.
 
 ### Restore procedure
@@ -638,21 +673,23 @@ Two runners are provided — `make` for Linux/macOS/VPS, `geo.ps1` for Windows.
 ## Architecture
 
 ```
-                     ┌──────────── app VPS ────────────┐
-Browser ──HTTPS──> Caddy ─┬──> /api/*  ──> FastAPI      │
-                     │    └──> /*      ──> nginx (SPA)  │
-                     │            Redis ────────────────┤
-                     │            Celery worker ────────┤
-                     └────────────────┬─────────────────┘
-                                      │
-              ┌───────────────────────┼───────────────────────┐
-              │ TLS (hostssl)         │  HTTPS                │
-              ▼                       ▼                       ▼
-      ┌── database VPS ──┐      Resend API          the sites being audited
-      │   Postgres 16    │    (transactional        + the LLM providers
-      │   5432, firewalled     mail)                  (user's own keys)
-      │   to the app VPS │
-      └──────────────────┘
+                ┌──────────────── the VPS ────────────────┐
+Browser ─HTTPS─>│ Caddy ─┬──> /api/*  ──> FastAPI          │
+                │        └──> /*      ──> nginx (SPA)      │
+                │                                          │
+                │  Celery worker      Redis                │
+                │        │              │                  │
+                │        └──────┬───────┘                  │
+                │               ▼                          │
+                │        Postgres 16  (TLS, hostssl-only,  │
+                │                      no published port)  │
+                └────────────────────┬─────────────────────┘
+                                     │ HTTPS
+                    ┌────────────────┴────────────────┐
+                    ▼                                 ▼
+              Resend API                   the sites being audited
+            (transactional mail)           + the LLM providers
+                                             (user's own keys)
 ```
 
 - **Backend** — Python 3.12, FastAPI, SQLAlchemy 2.0 async, Alembic, Pydantic v2.
@@ -662,8 +699,9 @@ Browser ──HTTPS──> Caddy ─┬──> /api/*  ──> FastAPI      │
   number of LLM calls, so they never run inside a request.
 - **Proxy** — Caddy rather than Nginx: on a single VPS it gets automatic
   Let's Encrypt certificates with three lines of config and renews them itself.
-- **Database** — off-box, reached over TLS; see [Database](#database) and
-  [Self-hosted database VPS](#self-hosted-database-vps).
+- **Database** — Postgres 16 in a container, reached over TLS on the Compose
+  network and never published to the host; see [Database](#database). Moving it
+  to its own machine later is [Self-hosted database VPS](#self-hosted-database-vps).
 - **Email** — Resend, sent from the worker; see [Email delivery](#email-delivery).
 
 Caddy is the only container that publishes ports.
