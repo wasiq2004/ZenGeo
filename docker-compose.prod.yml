@@ -207,7 +207,11 @@ services:
       resources:
         limits: {cpus: "0.75", memory: 640m}
     logging: *logging
-    networks: [internal]
+    networks:
+      internal:
+        # Caddy addresses this as `zgeo-backend`, never the bare `backend`.
+        # See the note on the frontend service for why.
+        aliases: [zgeo-backend]
 
   worker:
     # Same image as the backend - only the command differs.
@@ -267,7 +271,20 @@ services:
       resources:
         limits: {cpus: "0.25", memory: 96m}
     logging: *logging
-    networks: [internal]
+    networks:
+      internal:
+        # Caddy addresses this as `zgeo-frontend`, never the bare `frontend`.
+        #
+        # Caddy is attached to BOTH `internal` and the shared `dokploy-network`,
+        # and every Dokploy application on the host sits on that second network.
+        # A bare `frontend` therefore resolves against a namespace we do not
+        # control: if any other stack has a container with that alias, Docker's
+        # DNS may hand Caddy the wrong one, and the symptom is a 502 with
+        # `dial tcp <overlay-ip>:80: connect: connection refused` while our own
+        # nginx is running perfectly. These prefixed aliases cannot collide.
+        # Compose still adds the plain service name as an alias too; nothing
+        # inside `internal` needs to change.
+        aliases: [zgeo-frontend]
 
   caddy:
     # Internal router only. Traefik terminates TLS and forwards plain HTTP here;

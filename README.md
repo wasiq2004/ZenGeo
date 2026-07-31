@@ -263,10 +263,11 @@ Three secrets must be unique per environment:
 > the old one in `ENCRYPTION_KEY_FALLBACKS` (comma-separated) so existing
 > records still decrypt while they are re-saved.
 
-Leave `DATABASE_URL` and `MIGRATIONS_DATABASE_URL` commented out for local work.
-The dev override redirects `POSTGRES_HOST` at the throwaway container and turns
-TLS off, and it can only do that if the DSN is being built from the components
-rather than handed over whole.
+Leave `DATABASE_URL` and `MIGRATIONS_DATABASE_URL` commented out. Each compose
+file pins `POSTGRES_HOST`, `POSTGRES_PORT` and `POSTGRES_SSLMODE` for its own
+stack — development points at its throwaway container with TLS off, production
+at its own container with TLS required — and it can only do that if the DSN is
+built from the components rather than handed over whole.
 
 **2. Start everything.**
 
@@ -344,52 +345,133 @@ a usage restriction.
 ## Deploying to a VPS
 
 One box running Docker Compose. Everything — Postgres, Redis, the API, the
-worker, the built frontend and the TLS proxy — runs there, from a single file.
+worker, the built frontend and the router — runs there, from a single file.
+`docker-compose.prod.yml` is standalone: it never needs a second `-f`.
+
+There are two paths, and they differ only in **who owns ports 80/443 and issues
+the certificate**:
+
+| | [With Dokploy](#with-dokploy) | [Standalone](#standalone-no-platform) |
+|---|---|---|
+| Owns 80/443 | Dokploy's Traefik | this stack's Caddy |
+| Issues the certificate | Traefik | Caddy |
+| Caddy's job here | internal router on `:8080` | public entry point |
+| Caddyfile used | `Caddyfile.dokploy` | `Caddyfile.prod` |
+
+**The committed file is configured for Dokploy** — that is what this project
+deploys to. Switching to standalone takes three edits, listed under
+[Standalone](#standalone-no-platform).
 
 ### Sizing
 
 | Users | vCPU | RAM | Disk |
 |---|---|---|---|
-| Evaluation / single team | 2 | 2 GB | 20 GB |
-| Small production (tens of users) | 2–4 | 4 GB | 40 GB |
-| Busy (many concurrent audits) | 4–8 | 8 GB | 80 GB+ |
+| Evaluation / single team | 1–2 | 4 GB | 40 GB |
+| Small production (tens of users) | 2–4 | 8 GB | 80 GB |
+| Busy (many concurrent audits) | 4–8 | 16 GB | 160 GB+ |
 
-**RAM is the binding constraint**, and it is the worker that eats it — WeasyPrint
-holds a whole document in memory, and Argon2id is deliberately memory-hard at
-64 MiB per password verification. Redis, the API and the frontend are modest.
-These figures are roughly half what they were when Postgres lived on the same
-box; size the database separately at your provider.
+The committed resource limits are tuned for the **1 vCPU / 4 GB** row: roughly a
+2.2 GB steady-state ceiling across the stack, leaving room for the OS and, on
+Dokploy, for Traefik and the Dokploy agent.
 
-Disk now grows mainly with stored PDF reports (~50–150 KB each), since the
-database no longer sits on this volume.
+Two things to know before you change them:
 
-### First deploy
+- `deploy.resources.limits.cpus` is a **hard per-container ceiling**, and Docker
+  refuses to create a container whose value exceeds the host's core count. A
+  `1.5` on a 1 vCPU box fails outright with `range of CPUs is from 0.01 to 1.00`.
+  They are ceilings, not reservations, so they do not need to sum to the core
+  count.
+- **RAM is the binding constraint**, and the worker eats most of it — WeasyPrint
+  holds a whole document in memory and Argon2id is deliberately memory-hard at
+  64 MiB per password verification. On a 2 GB box, halve the `backend`, `worker`
+  and `postgres` limits and drop the worker to `--concurrency=1`.
+
+Disk carries both the database and the stored PDF reports (~50–150 KB each).
+
+### With Dokploy
+
+Dokploy's Traefik already owns 80 and 443 on the box, so **nothing in this stack
+publishes a port and nothing here requests a certificate**. Caddy stays as an
+internal router on `:8080`, because it is the one container that knows how to
+split a single hostname across two backends. That keeps Dokploy to one domain
+entry instead of hand-written path rules.
+
+**1. Point DNS at the VPS first.** Traefik orders the certificate on the first
+request and needs the name to resolve.
+
+**2. Create a Compose application** in Dokploy pointing at this repository, with
+the compose path `docker-compose.prod.yml`.
+
+**3. Environment tab — paste your whole `.env`.** This is the step people miss.
+`.env` is gitignored, so it never reaches the server with the repo. Without it
+the deploy stops at `set POSTGRES_USER in the Dokploy Environment tab`.
+
+**4. Domains tab — one entry, and only one:**
+
+| Field | Value |
+|---|---|
+| Host | your domain |
+| Service | `caddy` |
+| Container Port | `8080` |
+| Path / Internal Path | `/` |
+| Strip Path | off |
+| HTTPS | on, Let's Encrypt |
+| Middlewares | leave empty — Caddy already sets HSTS, CSP and the rest |
+
+Do **not** add entries for `frontend` or `backend`. Port 80 is the SPA container;
+routing the domain there makes the site load while every `/api/v1/...` call
+404s, because nginx knows nothing about the API. Caddy is what routes:
+
+```
+/api/*, /health, /healthz  ->  backend:8000
+everything else            ->  frontend:80
+```
+
+**5. Deploy.** A successful run shows the two Alembic migrations and then
+`Admin ready: <your admin email>` from the one-shot `init` service.
+
+The stack joins the external `dokploy-network` so Traefik can reach Caddy. If
+your install names that network differently (`docker network ls | grep dokploy`),
+change the one entry under `networks:` at the bottom of the compose file.
+
+### Standalone (no platform)
+
+Plain Docker Compose on a bare VPS, with Caddy owning 80/443 and getting its own
+certificate. Three edits to `docker-compose.prod.yml`:
+
+1. Mount `./infra/caddy/Caddyfile.prod` instead of `Caddyfile.dokploy`.
+2. Give `caddy` its ports back: `80:80`, `443:443`, `443:443/udp`.
+3. Delete `dokploy-network` from both the `caddy` service and the `networks:`
+   block, and put `caddy` on `[internal, edge]` with `edge:` declared.
+
+Then:
 
 ```bash
-# On the VPS
 git clone <your-repo-url> /opt/checkgeo
 cd /opt/checkgeo
 
 cp .env.example .env
-# Edit .env: set ENVIRONMENT=production, PUBLIC_DOMAIN, ACME_EMAIL,
+# Edit .env: ENVIRONMENT=production, PUBLIC_DOMAIN, ACME_EMAIL,
 # FRONTEND_URL=https://your-domain, CORS_ORIGINS=https://your-domain,
 # RESEND_API_KEY, MAIL_FROM, and freshly generated secrets.
-# The POSTGRES_* values create the database container - leave POSTGRES_HOST
-# as "postgres" and just set strong passwords.
+# Leave POSTGRES_HOST as "postgres" - it is the compose service name - and
+# just set strong passwords.
 
-# That is the whole deploy. It builds the images, starts Postgres, Redis, the
-# API, the worker, the frontend and Caddy, and a one-shot `init` service
-# applies the migrations and creates the first admin.
+# The whole deploy: builds the images, starts Postgres, Redis, the API, the
+# worker, the frontend and Caddy, and a one-shot `init` service applies the
+# migrations and creates the first admin.
 docker compose -f docker-compose.prod.yml up -d --build
 
 # Watch the one-shot job if you want to see the migrations land:
 docker compose -f docker-compose.prod.yml logs -f init
 ```
 
-Point an A record at the domain **before** the first start — Caddy obtains a
+Point an A record at the domain **before** the first start — Caddy orders a
 Let's Encrypt certificate on boot and needs the domain to resolve.
 
-The database is not published to the host: it is reachable only from the Compose
+### Either way
+
+The database is never published to the host; it is reachable only on the Compose
 network. Do not add a `ports:` entry for it. For a session, go through the
 container:
 
@@ -398,14 +480,15 @@ make prod-psql             # or: .\geo.ps1 prod-psql
 ```
 
 The app refuses to start in production with placeholder secrets, a plain-HTTP
-`FRONTEND_URL`, or `ALLOW_PRIVATE_NETWORK_FETCH=true`. That is deliberate: those
-are the mistakes worth failing loudly on.
+`FRONTEND_URL`, `ALLOW_PRIVATE_NETWORK_FETCH=true`, a `POSTGRES_SSLMODE` weaker
+than `require`, or a missing `RESEND_API_KEY`. That is deliberate: those are the
+mistakes worth failing loudly on.
 
 ### Firewall
 
-Only the proxy is exposed. Redis has no `ports:` entry in the production compose
-file, so it is reachable only on the internal Docker network, and Postgres is
-not on this box at all.
+Only the proxy is exposed. No service in the production stack has a `ports:`
+entry — Postgres, Redis, the API and the SPA are all reachable on the internal
+Docker network and nowhere else.
 
 ```bash
 ufw default deny incoming
@@ -417,21 +500,31 @@ ufw allow 443/udp       # HTTP/3
 ufw enable
 ```
 
-Do **not** open 5432 or 6379 inbound — nothing needs to reach into this box on
-either. The database connection is outbound only. For an interactive session
-use `make psql` (or `.\geo.ps1 psql`), which runs a client container against the
-configured DSN.
+Do **not** open 5432 or 6379 inbound. Nothing outside the box needs either, and
+the database now lives on this machine — publishing 5432 would put it on the
+internet behind nothing but a password. For an interactive session use
+`make prod-psql` (or `.\geo.ps1 prod-psql`), which goes through the container's
+local socket.
 
 ### Updating
 
+**With Dokploy:** push to the branch Dokploy tracks, then hit Redeploy. Take a
+backup first — see [Backups and restore](#backups-and-restore). Migrations are
+applied automatically by the `init` service on every deploy, and both its steps
+are idempotent, so a redeploy with no new migrations is a no-op.
+
+**Standalone:**
+
 ```bash
 cd /opt/checkgeo
-./infra/backup/pg_backup.sh        # or rely on your provider's snapshot
+./infra/backup/pg_backup.sh
 git pull
-docker compose -f docker-compose.prod.yml build
-docker compose -f docker-compose.prod.yml up -d
-docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
+docker compose -f docker-compose.prod.yml up -d --build
 ```
+
+`init` runs the migrations as part of that; the explicit
+`exec backend alembic upgrade head` is only needed if you want to apply them
+without restarting anything.
 
 ---
 
@@ -614,10 +707,10 @@ scp user@backup-host:/srv/checkgeo-backups/geo_audit-2026-07-30T03-00-00Z.sql.gz
 ```
 
 The script stops the backend and worker first (restoring under live traffic
-gives a torn result), streams the dump into the database through a client
-container, restarts the services, and applies any migrations newer than the
-dump. The dump is taken with `--clean --if-exists`, so it is safe to restore
-over an existing database.
+gives a torn result), streams the dump into the database through the postgres
+container's local socket, restarts the services, and applies any migrations
+newer than the dump. The dump is taken with `--clean --if-exists`, so it is safe
+to restore over an existing database.
 
 To restore the PDF reports as well:
 
@@ -628,11 +721,14 @@ docker compose exec -T backend tar -xzf - -C /data < <(gzip -dc backups/reports-
 Verify afterwards, rather than assuming:
 
 ```bash
-curl -fsS https://your-domain/healthz          # database reachable
-make psql -c 'select count(*) from users'      # rows actually came back
-```
+# database reachable through the whole path
+curl -fsS https://your-domain/healthz
 
-### Restore drill — do this before you need it
+# rows actually came back
+docker compose -f docker-compose.prod.yml exec -T postgres \
+  sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+         -tAc "select count(*) from users"'
+```
 
 ### Restore drill — do this before you need it
 
@@ -663,34 +759,61 @@ Two runners are provided — `make` for Linux/macOS/VPS, `geo.ps1` for Windows.
 | Tests | `make test` | `.\geo.ps1 test` |
 | Lint + types | `make lint` | `.\geo.ps1 lint` |
 | Dependency audit | `make audit` | `.\geo.ps1 audit` |
-| psql | `make psql` | `.\geo.ps1 psql` |
-| Create runtime DB role (once) | `make db-bootstrap` | `.\geo.ps1 db-bootstrap` |
-| Backup | `make backup` | `.\geo.ps1 backup` |
-| Production up | `make prod-up` | `.\geo.ps1 prod-up` |
+| psql (dev) | `make psql` | `.\geo.ps1 psql` |
+| Re-apply runtime DB role | `make db-bootstrap` | `.\geo.ps1 db-bootstrap` |
+| Backup the dev DB | `make dev-backup` | `.\geo.ps1 backup` |
+
+Production, run on the VPS. All of these target `docker-compose.prod.yml`:
+
+| Task | Make | PowerShell |
+|---|---|---|
+| Start the whole stack | `make prod-up` | `.\geo.ps1 prod-up` |
+| Stop it (volumes kept) | `make prod-down` | `.\geo.ps1 prod-down` |
+| Container status | `make prod-ps` | `.\geo.ps1 prod-ps` |
+| Tail logs | `make prod-logs S=init` | `.\geo.ps1 prod-logs init` |
+| psql | `make prod-psql` | `.\geo.ps1 prod-psql` |
+| Migrate by hand | `make prod-migrate` | `.\geo.ps1 prod-migrate` |
+| Seed admin by hand | `make prod-seed-admin` | `.\geo.ps1 prod-seed-admin` |
+| Backup | `make backup` | `.\geo.ps1 prod-backup` |
+
+Database work goes through `compose exec postgres`, so it uses the container's
+local socket — no client image to keep in step with the server version, and no
+TLS handshake to satisfy.
+
+Migrations and the admin seed run automatically on every production deploy via
+the one-shot `init` service; the two `by hand` rows are for when you want to
+apply them without a redeploy.
 
 ---
 
 ## Architecture
 
 ```
-                ┌──────────────── the VPS ────────────────┐
-Browser ─HTTPS─>│ Caddy ─┬──> /api/*  ──> FastAPI          │
-                │        └──> /*      ──> nginx (SPA)      │
-                │                                          │
-                │  Celery worker      Redis                │
-                │        │              │                  │
-                │        └──────┬───────┘                  │
-                │               ▼                          │
-                │        Postgres 16  (TLS, hostssl-only,  │
-                │                      no published port)  │
-                └────────────────────┬─────────────────────┘
-                                     │ HTTPS
-                    ┌────────────────┴────────────────┐
-                    ▼                                 ▼
-              Resend API                   the sites being audited
-            (transactional mail)           + the LLM providers
-                                             (user's own keys)
+                        ┌──────────── the VPS ────────────┐
+                        │                                 │
+Browser ──HTTPS──> Traefik ──plain──> Caddy :8080         │
+        (Dokploy owns   │              │                  │
+         80/443 and     │              ├──> /api/*   ──> FastAPI
+         the cert)      │              └──> /*       ──> nginx (SPA)
+                        │                                 │
+                        │   Celery worker     Redis       │
+                        │         │             │         │
+                        │         └──────┬──────┘         │
+                        │                ▼                │
+                        │         Postgres 16             │
+                        │   (TLS, hostssl-only, no port)  │
+                        └────────────────┬────────────────┘
+                                         │ HTTPS
+                        ┌────────────────┴────────────────┐
+                        ▼                                 ▼
+                  Resend API                 the sites being audited
+              (transactional mail)           + the LLM providers
+                                               (user's own keys)
 ```
+
+Standalone (no Dokploy), Caddy takes Traefik's place at the edge: it binds
+80/443 itself and obtains the certificate. Everything to the right of it is
+identical.
 
 - **Backend** — Python 3.12, FastAPI, SQLAlchemy 2.0 async, Alembic, Pydantic v2.
 - **Frontend** — TypeScript, React 18, Vite, Tailwind, TanStack Query, Recharts,
@@ -772,8 +895,16 @@ Implemented, not aspirational — most of these have tests.
   actor, target and a reason.
 
 **Dependencies** — pinned exactly, so they move only when Dependabot opens a PR
-and CI goes green on it. Both audits run on every push and weekly on a schedule:
-`pip-audit --strict` for Python, and `npm run audit:check` for JavaScript.
+(`.github/dependabot.yml` is still active). The GitHub Actions workflow that used
+to gate those PRs has been removed, so **the audits no longer run automatically**
+— run them yourself before merging a bump:
+
+```bash
+make audit          # or: .\geo.ps1 audit
+```
+
+That is `pip-audit --strict` for Python and `npm run audit:check` for
+JavaScript.
 
 `audit:check` is a small gate rather than a bare `npm audit`, because npm offers
 only "fail on everything" or "lower the threshold" — and neither is honest. It
@@ -831,6 +962,66 @@ the registry, so they pick it up with no further changes.
 
 ## Troubleshooting
 
+### Deployment
+
+**`service "init" didn't complete successfully: exit 1`.** That is the wrapper
+reporting an exit code, not the error. Read the container itself:
+
+```bash
+docker logs <project>-init-1 2>&1 | tail -30
+```
+
+`init` runs `alembic upgrade head && python -m app.scripts.seed_admin`, so
+whichever step failed prints its own reason there. The two below are the common
+ones.
+
+**`FATAL: password authentication failed for user "geo_app"`.** The Postgres
+data volume already exists and was initialised with different credentials. The
+image reads `POSTGRES_USER`/`POSTGRES_PASSWORD` **only** when it creates a fresh
+data directory; on every later start it ignores them and keeps whatever roles
+are already in the volume. Confirm with:
+
+```bash
+docker logs <project>-postgres-1 2>&1 | head -30
+# "Database directory appears to contain a database; Skipping initialization"
+#  ...and no "Created runtime role geo_runtime" line
+```
+
+The fix is to delete the volume so it initialises cleanly — which **destroys the
+database**, so it is only safe before you have real data:
+
+```bash
+docker volume rm <project>_postgres_data
+```
+
+Once there is data, restore from a dump instead; see
+[Restore procedure](#restore-procedure).
+
+**`range of CPUs is from 0.01 to 1.00, as there are only 1 CPUs available`.**
+A `deploy.resources.limits.cpus` value exceeds the host's core count. It is a
+hard ceiling, not a share — see [Sizing](#sizing).
+
+**`network dokploy-network declared as external, but could not be found`.** Your
+Dokploy install names its network something else. Check with
+`docker network ls | grep dokploy` and update the `networks:` block.
+
+**`env file .env not found`.** On Dokploy, the Environment tab is what
+materialises `.env` next to the compose file; fill it in. Standalone, you have
+not created `.env` on the server — it is gitignored and never travels with the
+repo.
+
+**`cannot execute: required file not found` on a shell script.** CRLF line
+endings: the kernel is looking for an interpreter literally named `/bin/sh\r`.
+`.gitattributes` forces LF on everything a Linux container reads, but a working
+tree copied from Windows before that existed can still carry them. Fix with
+`sed -i 's/\r$//' path/to/script.sh`.
+
+**The site loads but every API call 404s.** The domain is pointed at the
+`frontend` service. It must point at `caddy` on port `8080` — nginx serves the
+SPA and knows nothing about `/api/v1/...`. See [With Dokploy](#with-dokploy).
+
+### Running
+
 **Audit stuck on "Queued".** The worker is not consuming. Check
 `docker compose logs worker` and that Redis is healthy.
 
@@ -855,9 +1046,11 @@ prompts in the questionnaire. Both are reported in the skip reason.
 the audit — the results are already saved. Check the worker log for
 `report_failed`.
 
-**Certificate not issued.** Caddy needs the domain's DNS to resolve to the VPS
-and ports 80 and 443 reachable from the internet. `docker compose logs caddy`
-shows the ACME error.
+**Certificate not issued.** Whoever terminates TLS needs the domain's DNS to
+resolve to the VPS and ports 80 and 443 reachable from the internet. On Dokploy
+that is Traefik, so check Traefik's logs, not Caddy's — the Caddy in this stack
+never requests a certificate. Standalone, `docker compose logs caddy` shows the
+ACME error.
 
 **`got Future attached to a different loop` in the worker.** Every Celery task
 must dispose the database engine before its event loop closes — use
@@ -877,11 +1070,19 @@ directly — pytest, a bare `alembic` run, the app outside Compose — does not.
 Write the value out literally, or leave it unset and let the app build the DSN
 from the `POSTGRES_*` components.
 
-**`connection requires a valid client certificate` / TLS errors on startup.**
-Check `POSTGRES_SSLMODE` against what the provider expects, and remember the two
-spellings: `?ssl=` for the asyncpg runtime DSN, `?sslmode=` for the psycopg
-migration DSN. If you set `verify-full`, `POSTGRES_SSLROOTCERT` must point at a
-CA file that exists *inside the container*, not on the host.
+**`no pg_hba.conf entry for host ..., no encryption`.** Something tried to reach
+the production database over plain TCP. That server is deliberately
+`hostssl`-only — `infra/postgres/init/20-require-tls.sh` rewrites `pg_hba.conf`
+on first start — so the client must ask for TLS. Set `POSTGRES_SSLMODE=require`,
+and remember the two spellings: `?ssl=` for the asyncpg runtime DSN, `?sslmode=`
+for the psycopg migration DSN. The app builds both correctly from
+`POSTGRES_SSLMODE`; you only hit this connecting by hand.
+
+**TLS errors from a `verify-full` setting.** The production container's
+certificate is self-signed, so `verify-full` cannot succeed against it — use
+`require`, which encrypts without checking the chain. `verify-full` is for a
+managed provider that publishes a CA bundle, and then `POSTGRES_SSLROOTCERT`
+must point at a file that exists *inside the container*, not on the host.
 
 ---
 

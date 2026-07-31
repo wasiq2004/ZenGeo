@@ -13,6 +13,15 @@
 # security headers in a file you can read.
 #
 # Traffic path:  client --TLS--> Traefik --plain--> Caddy:8080 --> app
+#
+# Upstreams are `zgeo-backend` / `zgeo-frontend`, not the bare service names.
+# This container is attached to both the stack's private network and the shared
+# `dokploy-network` that every application on the host joins, so a bare
+# `frontend` resolves against a namespace we do not control - another stack's
+# container with the same alias can win the lookup, and the symptom is a 502
+# reading `dial tcp <overlay-ip>:80: connect: connection refused` while our own
+# nginx is running fine. The prefixed aliases are declared in
+# docker-compose.prod.yml and cannot collide.
 
 {
 	# Traefik already did TLS. Asking Caddy for a certificate here would fail:
@@ -52,7 +61,7 @@
 	# the right address. X-Forwarded-Proto is passed through by default too.
 	@api path /api/*
 	handle @api {
-		reverse_proxy backend:8000
+		reverse_proxy zgeo-backend:8000
 	}
 
 	# Health probes for external uptime monitoring.
@@ -63,12 +72,12 @@
 	# matcher token, and the two-path form is a config-adapter error.
 	@probes path /health /healthz
 	handle @probes {
-		reverse_proxy backend:8000
+		reverse_proxy zgeo-backend:8000
 	}
 
 	# Static SPA build.
 	handle {
-		reverse_proxy frontend:80
+		reverse_proxy zgeo-frontend:80
 	}
 
 	log {
