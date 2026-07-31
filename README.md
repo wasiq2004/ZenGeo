@@ -344,23 +344,24 @@ a usage restriction.
 
 ## Deploying to a VPS
 
-One box running Docker Compose. Everything — Postgres, Redis, the API, the
-worker, the built frontend and the router — runs there, from a single file.
-`docker-compose.prod.yml` is standalone: it never needs a second `-f`.
+One box running Docker Compose, deployed by **Dokploy**. Everything — Postgres,
+Redis, the API, the worker, the built frontend and the internal router — runs
+there from a single file. `docker-compose.prod.yml` is standalone: it never
+needs a second `-f`.
 
-There are two paths, and they differ only in **who owns ports 80/443 and issues
-the certificate**:
+Dokploy's Traefik owns ports 80 and 443 and issues the Let's Encrypt
+certificate, so **nothing in this stack publishes a port and nothing here
+requests a certificate**. Caddy stays as an internal router on `:8080`, because
+it is the one container that knows how to split a single hostname across two
+backends:
 
-| | [With Dokploy](#with-dokploy) | [Standalone](#standalone-no-platform) |
-|---|---|---|
-| Owns 80/443 | Dokploy's Traefik | this stack's Caddy |
-| Issues the certificate | Traefik | Caddy |
-| Caddy's job here | internal router on `:8080` | public entry point |
-| Caddyfile used | `Caddyfile.dokploy` | `Caddyfile.prod` |
+```
+/api/*, /health, /healthz  ->  backend:8000
+everything else            ->  frontend:80
+```
 
-**The committed file is configured for Dokploy** — that is what this project
-deploys to. Switching to standalone takes three edits, listed under
-[Standalone](#standalone-no-platform).
+That is why Dokploy needs only one domain entry rather than hand-written
+path-based Traefik rules.
 
 ### Sizing
 
@@ -434,42 +435,29 @@ The stack joins the external `dokploy-network` so Traefik can reach Caddy. If
 your install names that network differently (`docker network ls | grep dokploy`),
 change the one entry under `networks:` at the bottom of the compose file.
 
-### Standalone (no platform)
+### Sharing a host with other Dokploy apps
 
-Plain Docker Compose on a bare VPS, with Caddy owning 80/443 and getting its own
-certificate. Three edits to `docker-compose.prod.yml`:
+Every application Dokploy runs joins one shared network, `dokploy-network`, and
+Caddy is attached to it so Traefik can reach Caddy. That means Caddy's DNS
+lookups also see **every other stack's containers**, and compose registers each
+service under its bare service name — so a neighbouring app whose service is
+called `frontend` competes for that name.
 
-1. Mount `./infra/caddy/Caddyfile.prod` instead of `Caddyfile.dokploy`.
-2. Give `caddy` its ports back: `80:80`, `443:443`, `443:443/udp`.
-3. Delete `dokploy-network` from both the `caddy` service and the `networks:`
-   block, and put `caddy` on `[internal, edge]` with `edge:` declared.
+This is not hypothetical; it is why this stack addresses its own containers as
+`zgeo-backend` and `zgeo-frontend`, declared as network aliases in
+`docker-compose.prod.yml`. The symptom when it goes wrong is a 502 reading
 
-Then:
-
-```bash
-git clone <your-repo-url> /opt/checkgeo
-cd /opt/checkgeo
-
-cp .env.example .env
-# Edit .env: ENVIRONMENT=production, PUBLIC_DOMAIN, ACME_EMAIL,
-# FRONTEND_URL=https://your-domain, CORS_ORIGINS=https://your-domain,
-# RESEND_API_KEY, MAIL_FROM, and freshly generated secrets.
-# Leave POSTGRES_HOST as "postgres" - it is the compose service name - and
-# just set strong passwords.
-
-# The whole deploy: builds the images, starts Postgres, Redis, the API, the
-# worker, the frontend and Caddy, and a one-shot `init` service applies the
-# migrations and creates the first admin.
-docker compose -f docker-compose.prod.yml up -d --build
-
-# Watch the one-shot job if you want to see the migrations land:
-docker compose -f docker-compose.prod.yml logs -f init
+```
+dial tcp 10.0.1.x:80: connect: connection refused
 ```
 
-Point an A record at the domain **before** the first start — Caddy orders a
-Let's Encrypt certificate on boot and needs the domain to resolve.
+with your own nginx running perfectly — an address in the Swarm overlay range,
+which your frontend cannot hold because it is only on the private bridge.
 
-### Either way
+**If you add a service that Caddy must reach, give it a `zgeo-`-prefixed alias
+too.** Bare names are not safe on this host.
+
+### After deploying
 
 The database is never published to the host; it is reachable only on the Compose
 network. Do not add a `ports:` entry for it. For a session, go through the
@@ -508,23 +496,16 @@ local socket.
 
 ### Updating
 
-**With Dokploy:** push to the branch Dokploy tracks, then hit Redeploy. Take a
-backup first — see [Backups and restore](#backups-and-restore). Migrations are
-applied automatically by the `init` service on every deploy, and both its steps
-are idempotent, so a redeploy with no new migrations is a no-op.
-
-**Standalone:**
+Push to the branch Dokploy tracks, then hit Redeploy. Take a backup first — see
+[Backups and restore](#backups-and-restore):
 
 ```bash
-cd /opt/checkgeo
 ./infra/backup/pg_backup.sh
-git pull
-docker compose -f docker-compose.prod.yml up -d --build
 ```
 
-`init` runs the migrations as part of that; the explicit
-`exec backend alembic upgrade head` is only needed if you want to apply them
-without restarting anything.
+Migrations are applied by the one-shot `init` service on every deploy, and both
+its steps are idempotent, so a redeploy with no new migrations is a no-op. The
+explicit `make prod-migrate` is only for applying them without a redeploy.
 
 ---
 
@@ -811,9 +792,9 @@ Browser ──HTTPS──> Traefik ──plain──> Caddy :8080         │
                                                (user's own keys)
 ```
 
-Standalone (no Dokploy), Caddy takes Traefik's place at the edge: it binds
-80/443 itself and obtains the certificate. Everything to the right of it is
-identical.
+Caddy publishes no ports at all — Traefik reaches it over `dokploy-network`,
+which is also why its upstreams use `zgeo-`-prefixed aliases rather than bare
+service names.
 
 - **Backend** — Python 3.12, FastAPI, SQLAlchemy 2.0 async, Alembic, Pydantic v2.
 - **Frontend** — TypeScript, React 18, Vite, Tailwind, TanStack Query, Recharts,
@@ -1006,9 +987,8 @@ Dokploy install names its network something else. Check with
 `docker network ls | grep dokploy` and update the `networks:` block.
 
 **`env file .env not found`.** On Dokploy, the Environment tab is what
-materialises `.env` next to the compose file; fill it in. Standalone, you have
-not created `.env` on the server — it is gitignored and never travels with the
-repo.
+materialises `.env` next to the compose file — fill it in. It is gitignored, so
+it never travels to the server with the repo.
 
 **`cannot execute: required file not found` on a shell script.** CRLF line
 endings: the kernel is looking for an interpreter literally named `/bin/sh\r`.
@@ -1048,9 +1028,9 @@ the audit — the results are already saved. Check the worker log for
 
 **Certificate not issued.** Whoever terminates TLS needs the domain's DNS to
 resolve to the VPS and ports 80 and 443 reachable from the internet. On Dokploy
-that is Traefik, so check Traefik's logs, not Caddy's — the Caddy in this stack
-never requests a certificate. Standalone, `docker compose logs caddy` shows the
-ACME error.
+that is Traefik, so check Traefik's logs (`docker logs dokploy-traefik`) — the
+Caddy in this stack never requests a certificate and its log will show nothing
+about ACME.
 
 **`got Future attached to a different loop` in the worker.** Every Celery task
 must dispose the database engine before its event loop closes — use
