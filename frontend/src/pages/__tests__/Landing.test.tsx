@@ -36,14 +36,18 @@ describe('Landing page', () => {
     expect(screen.getByRole('link', { name: /skip to content/i })).toHaveAttribute('href', '#main')
   })
 
-  it('wears the marketing font rather than inheriting the app font', async () => {
+  it('wears the marketing fonts rather than inheriting the app font', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 401 })))
     const { container } = await renderWithProviders(<Landing />)
 
     // `font-app` is the inherited default, so the marketing tree has to opt in
     // at its root. Losing this class is the one way the two families can
     // silently converge - hence a test rather than a code comment.
-    expect(container.firstElementChild).toHaveClass('font-landing')
+    //
+    // `.mk-surface` replaced the older `font-landing` utility when the page
+    // took on the two-family pairing: it sets Inter for body copy AND Plus
+    // Jakarta Sans for headings, which a single Tailwind font utility cannot.
+    expect(container.firstElementChild).toHaveClass('mk-surface')
   })
 
   it('walks through the three steps to a score in place of a pricing table', async () => {
