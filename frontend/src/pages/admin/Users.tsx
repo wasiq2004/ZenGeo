@@ -196,7 +196,6 @@ export default function AdminUsers() {
                             </Link>
                             <span className="block truncate text-xs text-muted-foreground">
                               {user.email}
-                              {!user.is_email_verified && ' · unconfirmed'}
                             </span>
                           </span>
                         </div>

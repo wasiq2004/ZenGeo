@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { ArrowLeft, KeyRound, ShieldAlert } from 'lucide-react'
 import { Link, useParams } from 'react-router-dom'
+import { ResetPasswordCard } from '@/components/admin/ResetPasswordCard'
 import { PageHeader } from '@/components/layout/AppShell'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -78,7 +79,6 @@ export default function AdminUserDetail() {
             <Badge variant={user.is_active ? 'success' : 'destructive'}>
               {user.is_active ? 'Active' : 'Disabled'}
             </Badge>
-            {!user.is_email_verified && <Badge variant="muted">Email unconfirmed</Badge>}
             {user.mfa_enabled && <Badge variant="outline">2FA on</Badge>}
           </span>
         }
@@ -256,6 +256,8 @@ export default function AdminUserDetail() {
             )}
           </CardContent>
         </Card>
+
+        <ResetPasswordCard userId={user.id} email={user.email} />
       </div>
     </>
   )

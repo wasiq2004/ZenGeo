@@ -83,28 +83,6 @@ class UserPublic(ORMModel):
     last_login_at: datetime | None
 
 
-class EmailVerificationRequest(StrictModel):
-    token: str = Field(min_length=16, max_length=200)
-
-
-class ResendVerificationRequest(StrictModel):
-    email: EmailStr
-
-
-class PasswordResetRequest(StrictModel):
-    email: EmailStr
-
-
-class PasswordResetConfirm(StrictModel):
-    token: str = Field(min_length=16, max_length=200)
-    new_password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=128)
-
-    @field_validator("new_password")
-    @classmethod
-    def _strong(cls, v: str) -> str:
-        return validate_password_strength(v)
-
-
 class ChangePasswordRequest(StrictModel):
     current_password: str = Field(min_length=1, max_length=128)
     new_password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=128)

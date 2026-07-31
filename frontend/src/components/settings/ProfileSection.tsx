@@ -1,10 +1,8 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { MailCheck, MailWarning } from 'lucide-react'
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Alert } from '@/components/ui/feedback'
@@ -29,7 +27,6 @@ export function ProfileSection() {
   const { toast } = useToast()
   const queryClient = useQueryClient()
   const [emailError, setEmailError] = useState<string | null>(null)
-  const [emailSent, setEmailSent] = useState(false)
 
   const profileForm = useForm<z.infer<typeof profileSchema>>({
     resolver: zodResolver(profileSchema),
@@ -70,19 +67,10 @@ export function ProfileSection() {
       setEmailError(null)
       emailForm.reset()
       await refreshUser()
-      toast({
-        title: 'Email updated',
-        description: 'Check the new address for a confirmation link.',
-        variant: 'success',
-      })
+      toast({ title: 'Email updated', variant: 'success' })
     },
     onError: (error) =>
       setEmailError(error instanceof ApiError ? error.message : 'Something went wrong.'),
-  })
-
-  const resendVerification = useMutation({
-    mutationFn: () => api.post('/users/me/resend-verification'),
-    onSuccess: () => setEmailSent(true),
   })
 
   return (
@@ -111,41 +99,13 @@ export function ProfileSection() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            Email address
-            {user?.is_email_verified ? (
-              <Badge variant="success" className="gap-1">
-                <MailCheck aria-hidden="true" /> Confirmed
-              </Badge>
-            ) : (
-              <Badge variant="warning" className="gap-1">
-                <MailWarning aria-hidden="true" /> Unconfirmed
-              </Badge>
-            )}
-          </CardTitle>
+          <CardTitle>Email address</CardTitle>
           <CardDescription>
-            Currently <span className="font-medium text-foreground">{user?.email}</span>. Changing
-            it requires confirming the new address before you can run audits again.
+            Currently <span className="font-medium text-foreground">{user?.email}</span>. Your
+            current password is required to change it, and the change takes effect immediately.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {!user?.is_email_verified && (
-            <Alert variant="warning" title="Confirm your email to run audits">
-              {emailSent ? (
-                'A new confirmation link is on its way.'
-              ) : (
-                <Button
-                  variant="link"
-                  size="sm"
-                  className="h-auto p-0"
-                  loading={resendVerification.isPending}
-                  onClick={() => resendVerification.mutate()}
-                >
-                  Send a new confirmation link
-                </Button>
-              )}
-            </Alert>
-          )}
 
           <form
             onSubmit={emailForm.handleSubmit((v) => changeEmail.mutate(v))}

@@ -115,33 +115,16 @@ class Settings(BaseSettings):
     refresh_token_ttl_days: int = 14
     login_max_attempts: int = 5
     login_lockout_seconds: int = 900
-    require_email_verification: bool = True
-    email_token_ttl_hours: int = 24
-    password_reset_ttl_minutes: int = 60
+
+    # There is deliberately no email configuration here. This deployment sends
+    # no mail at all: accounts are usable the moment they are created, and
+    # password recovery is an admin action rather than a link in an inbox.
+    # See app/api/routes/admin.py :: reset_user_password.
 
     # --- First admin ---
     first_admin_email: str = "admin@example.com"
     first_admin_password: SecretStr = SecretStr("")
     first_admin_name: str = "Platform Admin"
-
-    # --- Email ---
-    # Resend is the primary transport. SMTP remains as a fallback for anyone
-    # self-hosting without it, and the console backend keeps dev and CI
-    # self-contained. Selection order is Resend -> SMTP -> console.
-    resend_api_key: SecretStr = SecretStr("")
-    resend_api_url: str = "https://api.resend.com/emails"
-    resend_timeout_seconds: float = 20.0
-    # RFC 5322 "Display Name <address>", or a bare address. SMTP_FROM is
-    # accepted too, so an existing .env from before Resend keeps working.
-    mail_from: str = Field(
-        default="CheckGEO.ai <no-reply@example.com>",
-        validation_alias=AliasChoices("MAIL_FROM", "SMTP_FROM"),
-    )
-    smtp_host: str = ""
-    smtp_port: int = 587
-    smtp_user: str = ""
-    smtp_password: SecretStr = SecretStr("")
-    smtp_starttls: bool = True
 
     # --- Audit engine ---
     reports_dir: str = "/data/reports"
@@ -159,7 +142,6 @@ class Settings(BaseSettings):
     # --- Rate limits ---
     rate_limit_login: str = "10/15minutes"
     rate_limit_signup: str = "5/hour"
-    rate_limit_password_reset: str = "5/hour"  # noqa: S105 - a rate limit, not a secret
     rate_limit_audit_start: str = "20/hour"
     rate_limit_default: str = "300/minute"
 
@@ -180,39 +162,6 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
-
-    @property
-    def mail_from_parts(self) -> tuple[str, str]:
-        """``MAIL_FROM`` split into (display name, bare address).
-
-        ``parseaddr`` is the stdlib's RFC 5322 parser rather than a regex of our
-        own - the format has more corner cases (quoted names, comments, angle
-        brackets) than it looks like it does.
-        """
-        from email.utils import parseaddr
-
-        name, address = parseaddr(self.mail_from)
-        return name.strip(), address.strip()
-
-    @property
-    def mail_from_address(self) -> str:
-        """Just the address, for envelope-level use and validation."""
-        return self.mail_from_parts[1]
-
-    @property
-    def mail_from_domain(self) -> str:
-        """The sending domain - the thing that must be verified at Resend."""
-        _, address = self.mail_from_parts
-        return address.rpartition("@")[2].lower()
-
-    @property
-    def email_backend(self) -> Literal["resend", "smtp", "console"]:
-        """Which transport an outgoing message will actually take."""
-        if self.resend_api_key.get_secret_value():
-            return "resend"
-        if self.smtp_host:
-            return "smtp"
-        return "console"
 
     @property
     def is_production(self) -> bool:
@@ -297,25 +246,10 @@ class Settings(BaseSettings):
                 "POSTGRES_SSLMODE must be 'require' or stricter in production - the "
                 "managed database is reached over an untrusted network"
             )
-        # Email in production must actually leave the building. The console
-        # backend silently swallowing a password-reset link is the kind of
-        # failure nobody notices until a user cannot get back into their account.
-        if not self.resend_api_key.get_secret_value():
-            problems.append(
-                "RESEND_API_KEY is required in production - without it transactional "
-                "email falls back to the console backend and is never delivered"
-            )
-        from_name, from_address = self.mail_from_parts
-        if not from_address or "@" not in from_address:
-            problems.append(f"MAIL_FROM is not a usable address: {self.mail_from!r}")
-        elif self.mail_from_domain.endswith("example.com"):
-            problems.append("MAIL_FROM still points at the example.com placeholder domain")
-        if not from_name:
-            # Not fatal, but an unnamed sender reads as spam to both filters
-            # and people.
-            problems.append(
-                'MAIL_FROM has no display name; use the form "CheckGEO.ai <no-reply@…>"'
-            )
+        # No email checks: this deployment has no mail transport by design.
+        # The thing that used to make that dangerous - an unreachable
+        # password-reset link - no longer exists either, because recovery is an
+        # admin action instead of a link.
 
         for name, url in (
             ("DATABASE_URL", self.database_url_override),

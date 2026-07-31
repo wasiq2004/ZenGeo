@@ -6,10 +6,16 @@
  * nothing leaks a referrer to a font host, and the strict CSP does not need a
  * `font-src`/`style-src` exception for fonts.
  *
- * Two families, kept deliberately apart (see `--font-landing` / `--font-app` in
- * index.css):
- *   Poppins    - marketing surfaces (landing page, auth screens)
- *   Open Sans  - the authenticated product (user panel, admin panel)
+ * Three families, kept deliberately apart (see `--font-landing`,
+ * `--font-landing-body` and `--font-app` in index.css):
+ *   Plus Jakarta Sans - marketing headings, matching zenautomations.in
+ *   Inter             - marketing body copy, same pairing as that site
+ *   Open Sans         - the authenticated product (user panel, admin panel)
+ *
+ * The marketing pair is loaded here rather than from the Google Fonts CDN the
+ * reference site uses, because our CSP is `style-src 'self' 'unsafe-inline'`
+ * and `font-src 'self' data:` - a fonts.googleapis.com stylesheet would be
+ * blocked outright, and the font files with it.
  *
  * Two axes of restraint, because each import is bytes on first paint:
  *
@@ -25,10 +31,16 @@
  *   which is the right outcome for a user-entered business name in another
  *   script: legible immediately, rather than in-brand eventually.
  */
-import '@fontsource/poppins/latin-400.css'
-import '@fontsource/poppins/latin-500.css'
-import '@fontsource/poppins/latin-600.css'
-import '@fontsource/poppins/latin-700.css'
+// Headings. 800 is carried because the hero and section headlines use it.
+import '@fontsource/plus-jakarta-sans/latin-500.css'
+import '@fontsource/plus-jakarta-sans/latin-600.css'
+import '@fontsource/plus-jakarta-sans/latin-700.css'
+import '@fontsource/plus-jakarta-sans/latin-800.css'
+
+// Marketing body copy.
+import '@fontsource/inter/latin-400.css'
+import '@fontsource/inter/latin-500.css'
+import '@fontsource/inter/latin-600.css'
 
 import '@fontsource/open-sans/latin-400.css'
 import '@fontsource/open-sans/latin-500.css'

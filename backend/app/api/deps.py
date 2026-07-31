@@ -10,7 +10,6 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.security import decode_access_token
 from app.db.models.user import User, UserRole
@@ -70,20 +69,13 @@ async def get_current_user(
 CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
-async def get_verified_user(user: CurrentUser) -> User:
-    """Gate for actions that consume real resources (running audits)."""
-    if settings.require_email_verification and not user.is_email_verified:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=(
-                "Confirm your email address before running an audit. "
-                "Check your inbox or request a new link from Settings."
-            ),
-        )
-    return user
-
-
-VerifiedUser = Annotated[User, Depends(get_verified_user)]
+#: Previously an email-verification gate on actions that spend real resources.
+#: This deployment sends no mail, so there is no verification step to gate on
+#: and every authenticated user may run an audit. Kept as an alias rather than
+#: deleted so the intent stays visible at the call sites in audits.py - if a
+#: mail transport is ever added, the gate goes back here and nothing else has
+#: to change.
+VerifiedUser = CurrentUser
 
 
 async def get_admin_user(user: CurrentUser) -> User:

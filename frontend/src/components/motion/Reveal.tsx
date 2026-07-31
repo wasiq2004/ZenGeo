@@ -12,14 +12,16 @@
 import { motion, useReducedMotion, type Variants } from 'motion/react'
 import type { ReactNode } from 'react'
 
-/** Slow-out easing - fast to start, settles gently. */
-const EASE = [0.22, 1, 0.36, 1] as const
+/** Slow-out easing - fast to start, settles gently.
+ *  cubic-bezier(.16,1,.3,1), lifted from zenautomations.in so the two sites
+ *  move the same way. */
+const EASE = [0.16, 1, 0.3, 1] as const
 
 export function Reveal({
   children,
   className,
   delay = 0,
-  y = 16,
+  y = 34,
 }: {
   children: ReactNode
   className?: string
@@ -36,7 +38,7 @@ export function Reveal({
       initial={{ opacity: 0, y }}
       whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true, amount: 0.2 }}
-      transition={{ duration: 0.55, delay, ease: EASE }}
+      transition={{ duration: 0.9, delay, ease: EASE }}
     >
       {children}
     </motion.div>
@@ -49,8 +51,8 @@ const containerVariants: Variants = {
 }
 
 const itemVariants: Variants = {
-  hidden: { opacity: 0, y: 14 },
-  shown: { opacity: 1, y: 0, transition: { duration: 0.5, ease: EASE } },
+  hidden: { opacity: 0, y: 28 },
+  shown: { opacity: 1, y: 0, transition: { duration: 0.9, ease: EASE } },
 }
 
 /**

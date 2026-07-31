@@ -21,7 +21,6 @@ from app.audit.pillars.base import PillarResult
 from app.audit.scoring import compute_composite, prioritise_recommendations
 from app.core.logging import get_logger
 from app.db.models.audit import Audit, AuditEvent, AuditStatus
-from app.db.models.user import User
 from app.db.session import SessionLocal
 from app.llm import LLMProvider
 from app.services import llm_keys as key_service
@@ -166,7 +165,6 @@ class AuditRunner:
             band=composite.band,
             duration_s=round(elapsed, 2),
         )
-        await self._notify(composite.score, composite.band, str(business_snapshot["name"]))
 
     async def _run_pillars(
         self, *, user_id: uuid.UUID, business: dict[str, Any], questionnaire: dict[str, Any]
@@ -290,27 +288,6 @@ class AuditRunner:
                 audit.pdf_report_path = str(path)
                 await db.commit()
         await self._record_event("report", "PDF report ready to download.")
-
-    async def _notify(self, score: float, band: str, business_name: str) -> None:
-        from app.services.email import send_audit_complete_email
-
-        async with SessionLocal() as db:
-            audit = await db.get(Audit, self.audit_id)
-            if audit is None:
-                return
-            user = await db.get(User, audit.user_id)
-            if user is None or not user.notify_audit_complete:
-                return
-            recipient, name = user.email, user.full_name
-
-        await send_audit_complete_email(
-            to=recipient,
-            name=name,
-            business=business_name,
-            score=score,
-            band=band,
-            audit_id=str(self.audit_id),
-        )
 
     async def _fail(self, message: str) -> None:
         async with SessionLocal() as db:

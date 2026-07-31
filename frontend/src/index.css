@@ -36,13 +36,32 @@
     --radius: 0.7rem;
 
     /* --- Typography ---------------------------------------------------
-       Two families that must never bleed into each other: the marketing
-       surface wears Poppins, the authenticated product wears Open Sans.
-       Nothing consumes these directly - use the `font-landing` / `font-app`
-       Tailwind utilities, which are the only things that read them. Both are
+       Families that must never bleed into each other: the marketing surface
+       wears Plus Jakarta Sans over Inter (the pairing zenautomations.in uses),
+       the authenticated product wears Open Sans. Nothing consumes these
+       directly - use the `font-landing` / `font-landing-body` / `font-app`
+       Tailwind utilities, which are the only things that read them. All are
        self-hosted (see src/styles/fonts.ts). */
-    --font-landing: 'Poppins', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --font-landing: 'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --font-landing-body: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
     --font-app: 'Open Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+    /* --- Marketing accent ---------------------------------------------
+       Cyan -> gold, taken from zenautomations.in so the two sites read as one
+       brand. Scoped to the landing tree on purpose: the authenticated product
+       keeps its indigo primary and nothing here touches --primary.
+
+       These are the LIGHT-mode steps and they are darker than the reference's,
+       which is not a deviation but a requirement: that site is dark-only, and
+       its #2dc6de / #f5c518 measure 2.05:1 and 1.63:1 on white - unreadable as
+       text. Stepped down to 4.68:1 and 5.07:1 here; the .dark block below
+       restores the original hues, which clear 9.5:1 and 11.9:1 on the dark
+       surface. The easing is the reference's own: a long, slow-out settle. */
+    --mk-cyan: #0e7f95;
+    --mk-cyan-soft: #0a7186;
+    --mk-gold: #8a6a00;
+    --mk-grad: linear-gradient(115deg, #0e7f95 0%, #2b8f86 48%, #8a6a00 100%);
+    --mk-ease: cubic-bezier(0.16, 1, 0.3, 1);
 
     /* --- Data visualisation tokens -----------------------------------
        Score bands are STATUS colours (ordered severity), not categorical
@@ -78,6 +97,13 @@
     --primary-foreground: 226 40% 8%;
     --secondary: 226 24% 16%;
     --secondary-foreground: 220 25% 92%;
+
+    /* Marketing accent, dark mode: the reference's own hues, which is where
+       they belong - 9.47:1 and 11.91:1 against this surface. */
+    --mk-cyan: #2dc6de;
+    --mk-cyan-soft: #5fd6e6;
+    --mk-gold: #f5c518;
+    --mk-grad: linear-gradient(115deg, #2dc6de 0%, #69cfc9 48%, #f5c518 100%);
 
     --muted: 226 24% 15%;
     --muted-foreground: 220 12% 62%;
@@ -205,6 +231,71 @@
       transparent
     );
     animation: shimmer 1.6s infinite;
+  }
+}
+
+/* Marketing type pairing: Inter for body, Plus Jakarta Sans for headings -
+   the split zenautomations.in uses. Declared once on the tree root rather than
+   as a utility on every heading, so a new section cannot forget it. */
+.mk-surface {
+  font-family: var(--font-landing-body);
+}
+.mk-surface :is(h1, h2, h3, h4, .mk-display) {
+  font-family: var(--font-landing);
+}
+
+/* --- Marketing surface -----------------------------------------------
+   Utilities for the landing tree only. Named `mk-` so nothing in the
+   authenticated product can pick them up by accident, and so a reader can tell
+   at a glance which surface a class belongs to. Modelled on zenautomations.in:
+   a cyan-to-gold gradient, a long slow-out ease, and a small lift on hover. */
+
+.mk-gradient-text {
+  background-image: var(--mk-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.mk-gradient-bg {
+  background-image: var(--mk-grad);
+}
+
+/* Hover lift. The reference moves cards 2-7px; 4px reads as responsive without
+   the layout feeling loose. Shadow rather than glow in light mode, where a
+   coloured bloom on white reads as a rendering fault. */
+.mk-lift {
+  transition:
+    transform 0.45s var(--mk-ease),
+    box-shadow 0.45s var(--mk-ease),
+    border-color 0.45s var(--mk-ease);
+}
+.mk-lift:hover {
+  transform: translateY(-4px);
+  border-color: color-mix(in srgb, var(--mk-cyan) 38%, transparent);
+  box-shadow: 0 18px 40px -24px color-mix(in srgb, var(--mk-cyan) 55%, transparent);
+}
+
+/* Ambient orbs behind the hero. Decorative, so callers mark them aria-hidden;
+   the drift is disabled wholesale by the reduced-motion block below. */
+.mk-orb {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(60px);
+  opacity: 0.5;
+  animation: mk-drift 18s ease-in-out infinite;
+}
+.dark .mk-orb {
+  opacity: 0.42;
+}
+
+@keyframes mk-drift {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(1.5rem, -1rem, 0) scale(1.07);
   }
 }
 

@@ -11,31 +11,37 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import EmailStr, Field
+from pydantic import Field, field_validator
 
 from app.db.models.user import UserRole
+from app.schemas.auth import MIN_PASSWORD_LENGTH, validate_password_strength
 from app.schemas.common import ORMModel, StrictModel
 
 
-class EmailTestRequest(StrictModel):
-    """Where to send the deliverability probe.
+class AdminPasswordReset(StrictModel):
+    """A new password chosen by an administrator for a locked-out user.
 
-    Optional: omitted, it goes to the calling administrator's own address,
-    which is the safe default. Allowing an arbitrary recipient is what makes
-    this endpoint worth rate-limiting and audit-logging.
+    The admin supplies the value rather than the server generating one, so it
+    can be read out over whatever channel is already trusted (a call, a chat)
+    without a second system holding a copy.
     """
 
-    to: EmailStr | None = None
+    new_password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=128)
+    #: Free-text note written to the admin audit trail.
+    reason: str = Field(default="", max_length=300)
+
+    @field_validator("new_password")
+    @classmethod
+    def _strength(cls, v: str) -> str:
+        return validate_password_strength(v)
 
 
-class EmailTestResult(StrictModel):
-    delivered: bool
-    backend: Literal["resend", "smtp", "console"]
-    to: str
-    mail_from: str
-    sending_domain: str
-    #: Resend's message id, when the provider returned one.
-    provider_message_id: str | None = None
+class AdminPasswordResetResult(StrictModel):
+    email: str
+    #: Echoed back exactly once so the admin can pass it on. Stored only as an
+    #: Argon2 hash, so there is no way to retrieve it later.
+    new_password: str
+    sessions_revoked: int
     detail: str
 
 

@@ -15,12 +15,10 @@ from app.core.security import verify_password
 from app.db.models.audit import Audit
 from app.db.models.business import Business
 from app.db.models.llm_key import LLMApiKey
-from app.db.models.user import TokenPurpose, User
+from app.db.models.user import User
 from app.schemas.auth import UserPublic
 from app.schemas.common import Message
 from app.schemas.user import AccountDeleteRequest, EmailChangeRequest, ProfileUpdate
-from app.services import auth_service
-from app.services import email as email_service
 
 router = APIRouter(prefix="/users", tags=["users"])
 log = get_logger("users")
@@ -60,44 +58,16 @@ async def change_email(
             status_code=status.HTTP_409_CONFLICT, detail="That address is already in use"
         )
 
-    # Captured before the change: the old address is the one an attacker who
-    # has just taken over the account does not control, so it is where the
-    # "this happened" notice has to go.
+    # No confirmation step and no "this address changed" notice - there is no
+    # mail transport to carry either. The current password checked above is the
+    # only thing standing between a session and a new address on the account,
+    # which is why that check is not optional.
     previous_email = user.email
-
-    # The new address is unverified until confirmed, which re-gates audit runs.
     user.email = new_email
-    user.is_email_verified = False
-    token = await auth_service.create_user_token(
-        db, user=user, purpose=TokenPurpose.email_verification
-    )
     await db.commit()
 
-    await email_service.send_verification_email(
-        to=new_email, name=user.full_name, token=token
-    )
-    await email_service.send_email_changed_notice(
-        to=previous_email, name=user.full_name, new_email=new_email
-    )
-    log.info("email_changed", user_id=str(user.id))
-    return Message(detail="Email updated. Check your inbox to confirm the new address.")
-
-
-@router.post(
-    "/me/resend-verification", response_model=Message, summary="Resend your confirmation link"
-)
-async def resend_verification(user: CurrentUser, db: DbSession) -> Message:
-    if user.is_email_verified:
-        return Message(detail="Your email is already confirmed.")
-
-    token = await auth_service.create_user_token(
-        db, user=user, purpose=TokenPurpose.email_verification
-    )
-    await db.commit()
-    await email_service.send_verification_email(
-        to=user.email, name=user.full_name, token=token
-    )
-    return Message(detail="Confirmation link sent.")
+    log.info("email_changed", user_id=str(user.id), previous_email=previous_email)
+    return Message(detail="Email updated.")
 
 
 @router.get("/me/export", summary="Download everything we hold about you")

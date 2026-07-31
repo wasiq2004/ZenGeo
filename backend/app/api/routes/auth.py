@@ -8,7 +8,6 @@ per-request on the server - the role in the token is not a client-side decision.
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from sqlalchemy import select
 
 from app.api.cookies import (
     clear_auth_cookies,
@@ -22,24 +21,18 @@ from app.core.crypto import decrypt_secret
 from app.core.logging import get_logger
 from app.core.rate_limit import RateLimit, client_ip, consume_identifier_budget
 from app.core.security import create_access_token, verify_password
-from app.db.models.user import TokenPurpose, User
 from app.schemas.auth import (
     ChangePasswordRequest,
-    EmailVerificationRequest,
     LoginRequest,
     MFAActivateRequest,
     MFADisableRequest,
     MFASetupResponse,
-    PasswordResetConfirm,
-    PasswordResetRequest,
-    ResendVerificationRequest,
     SignupRequest,
     TokenResponse,
     UserPublic,
 )
 from app.schemas.common import Message
 from app.services import auth_service, mfa
-from app.services import email as email_service
 from app.services.auth_service import AuthError
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -47,13 +40,6 @@ log = get_logger("auth.routes")
 
 login_limit = RateLimit(settings.rate_limit_login, scope="login")
 signup_limit = RateLimit(settings.rate_limit_signup, scope="signup")
-reset_limit = RateLimit(settings.rate_limit_password_reset, scope="password-reset")
-
-#: Deliberately identical whether or not the address exists, so the endpoint
-#: cannot be used to discover who has an account.
-GENERIC_RESET_RESPONSE = Message(
-    detail="If an account exists for that address, a reset link is on its way."
-)
 
 
 def _http_error(exc: AuthError) -> HTTPException:
@@ -101,24 +87,11 @@ async def signup(
     except AuthError as exc:
         raise _http_error(exc) from exc
 
-    # No verification step means no token and no message: the account is already
-    # usable, and sending a link that confirms something nothing checks would
-    # only fail loudly in the log on a deployment with no mail transport.
-    token = (
-        await auth_service.create_user_token(
-            db, user=user, purpose=TokenPurpose.email_verification
-        )
-        if settings.require_email_verification
-        else None
-    )
+    # Straight into a session. There is no verification step to complete, so the
+    # account is usable from this response onwards.
     session = await _issue_session(db, response, request, user)
     await db.commit()
-
-    # Sent after commit so a mail failure cannot roll back the new account.
-    if token is not None:
-        await email_service.send_verification_email(
-            to=user.email, name=user.full_name, token=token
-        )
+    log.info("signup_success", user_id=str(user.id))
     return session
 
 
@@ -219,84 +192,13 @@ async def me(user: CurrentUser) -> UserPublic:
 
 
 # --------------------------------------------------------------------------- #
-# Email verification
+# Password
 # --------------------------------------------------------------------------- #
-@router.post("/verify-email", response_model=UserPublic, summary="Confirm an email address")
-async def verify_email(payload: EmailVerificationRequest, db: DbSession) -> UserPublic:
-    try:
-        user = await auth_service.consume_user_token(
-            db, raw_token=payload.token, purpose=TokenPurpose.email_verification
-        )
-    except AuthError as exc:
-        raise _http_error(exc) from exc
-
-    user.is_email_verified = True
-    await db.commit()
-    log.info("email_verified", user_id=str(user.id))
-    return UserPublic.model_validate(user)
-
-
-@router.post(
-    "/resend-verification",
-    response_model=Message,
-    dependencies=[Depends(reset_limit)],
-    summary="Send a new confirmation link",
-)
-async def resend_verification(payload: ResendVerificationRequest, db: DbSession) -> Message:
-    user = await db.scalar(select(User).where(User.email == str(payload.email)))
-    if user and not user.is_email_verified and user.is_active:
-        token = await auth_service.create_user_token(
-            db, user=user, purpose=TokenPurpose.email_verification
-        )
-        await db.commit()
-        await email_service.send_verification_email(
-            to=user.email, name=user.full_name, token=token
-        )
-    # Same response either way - no account enumeration.
-    return Message(detail="If that address needs confirming, a new link is on its way.")
-
-
-# --------------------------------------------------------------------------- #
-# Password reset
-# --------------------------------------------------------------------------- #
-@router.post(
-    "/password-reset/request",
-    response_model=Message,
-    dependencies=[Depends(reset_limit)],
-    summary="Request a password reset link",
-)
-async def request_password_reset(payload: PasswordResetRequest, db: DbSession) -> Message:
-    user = await db.scalar(select(User).where(User.email == str(payload.email)))
-    if user and user.is_active:
-        token = await auth_service.create_user_token(
-            db, user=user, purpose=TokenPurpose.password_reset
-        )
-        await db.commit()
-        await email_service.send_password_reset_email(
-            to=user.email, name=user.full_name, token=token
-        )
-    return GENERIC_RESET_RESPONSE
-
-
-@router.post(
-    "/password-reset/confirm",
-    response_model=Message,
-    dependencies=[Depends(reset_limit)],
-    summary="Set a new password using a reset token",
-)
-async def confirm_password_reset(payload: PasswordResetConfirm, db: DbSession) -> Message:
-    try:
-        user = await auth_service.consume_user_token(
-            db, raw_token=payload.token, purpose=TokenPurpose.password_reset
-        )
-    except AuthError as exc:
-        raise _http_error(exc) from exc
-
-    await auth_service.set_password(db, user=user, new_password=payload.new_password)
-    await db.commit()
-    return Message(detail="Password updated. You can now sign in.")
-
-
+# There is no email verification and no self-service password reset: this
+# deployment sends no mail, so a link-based flow would have nowhere to deliver
+# to. Changing your own password below still works because it is authenticated
+# by the current password rather than by a token. A user who is locked out is
+# recovered by an administrator - see admin.reset_user_password.
 @router.post("/change-password", response_model=Message, summary="Change your password")
 async def change_password(
     payload: ChangePasswordRequest, user: CurrentUser, response: Response, db: DbSession

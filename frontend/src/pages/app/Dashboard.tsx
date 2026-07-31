@@ -58,14 +58,6 @@ export default function Dashboard() {
         }
       />
 
-      {user && !user.is_email_verified && (
-        <Alert variant="warning" title="Confirm your email to run audits" className="mb-6">
-          <Link to="/app/settings" className="font-medium">
-            Send a new confirmation link
-          </Link>
-        </Alert>
-      )}
-
       {!hasAudits ? (
         <EmptyState
           icon={Gauge}

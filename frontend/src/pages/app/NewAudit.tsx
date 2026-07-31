@@ -20,7 +20,6 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { api, ApiError } from '@/lib/api'
-import { useAuth } from '@/lib/auth'
 import { PROVIDER_LABEL } from '@/lib/geo'
 import type { Business, LLMApiKey } from '@/lib/types'
 import { cn } from '@/lib/utils'
@@ -90,7 +89,6 @@ function toLines(value: string | undefined): string[] {
 
 export default function NewAudit() {
   const navigate = useNavigate()
-  const { user } = useAuth()
   const [step, setStep] = useState(0)
   const [formError, setFormError] = useState<string | null>(null)
   const [existingId, setExistingId] = useState<string>('')
@@ -191,22 +189,6 @@ export default function NewAudit() {
   }
 
   const isLast = step === STEPS.length - 1
-
-  if (user && !user.is_email_verified) {
-    return (
-      <>
-        <PageHeader title="Run an audit" />
-        <Alert variant="warning" title="Confirm your email first">
-          Audits run against real websites and can spend credit on your own API keys, so we ask
-          you to confirm your address before the first one.{' '}
-          <Link to="/app/settings" className="font-medium">
-            Send a new confirmation link
-          </Link>
-          .
-        </Alert>
-      </>
-    )
-  }
 
   return (
     <>

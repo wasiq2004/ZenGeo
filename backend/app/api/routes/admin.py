@@ -16,22 +16,21 @@ from sqlalchemy import case, desc, func, or_, select
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import AdminUser, DbSession, Pagination
-from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.rate_limit import RateLimit, client_ip
 from app.db.models.analytics import AdminAuditLog
 from app.db.models.audit import Audit, AuditStatus
 from app.db.models.business import Business
 from app.db.models.llm_key import LLMApiKey
-from app.db.models.user import User, UserRole
+from app.db.models.user import RefreshToken, User, UserRole
 from app.schemas.admin import (
     AdminAuditRow,
     AdminLogEntry,
+    AdminPasswordReset,
+    AdminPasswordResetResult,
     AdminStats,
     AdminUserRow,
     AdminUserUpdate,
-    EmailTestRequest,
-    EmailTestResult,
 )
 from app.schemas.common import Message, Page
 from app.services import admin_log, auth_service
@@ -39,10 +38,10 @@ from app.services import admin_log, auth_service
 router = APIRouter(prefix="/admin", tags=["admin"])
 log = get_logger("admin")
 
-# Sending real mail on demand: tight, because every call costs provider quota
-# and an admin account is exactly what an attacker would use to turn this into
-# a spam relay.
-email_test_limit = RateLimit("10/hour", scope="admin-email-test")
+# Resetting someone else's password is the most sensitive thing an admin can
+# do here, and it is the only account-recovery path, so it is rate-limited and
+# written to the audit trail.
+password_reset_limit = RateLimit("20/hour", scope="admin-password-reset")
 
 
 @router.get("/stats", response_model=AdminStats, summary="Platform-wide KPIs")
@@ -484,79 +483,72 @@ async def activity_log(
 
 
 @router.post(
-    "/email/test-send",
-    response_model=EmailTestResult,
-    dependencies=[Depends(email_test_limit)],
-    summary="Send a test message to confirm mail delivery works",
+    "/users/{user_id}/reset-password",
+    response_model=AdminPasswordResetResult,
+    dependencies=[Depends(password_reset_limit)],
+    summary="Set a new password for a user",
 )
-async def email_test_send(
-    payload: EmailTestRequest,
+async def reset_user_password(
+    user_id: uuid.UUID,
+    payload: AdminPasswordReset,
     admin: AdminUser,
     db: DbSession,
     request: Request,
-) -> EmailTestResult:
-    """Prove the mail path end to end without waiting for a real signup.
+) -> AdminPasswordResetResult:
+    """Recover a locked-out account.
 
-    Deliberately synchronous rather than queued: the point is to see the
-    provider's answer, and a queued send would return 202 and hide the failure
-    in a worker log. Recorded in the admin audit trail because it can be
-    pointed at an arbitrary address.
+    This deployment sends no email, so there is no self-service "forgot
+    password" link - this endpoint is the entire recovery path, and without it
+    a forgotten password would mean a permanently unreachable account.
+
+    The new password is returned exactly once, in this response, for the admin
+    to hand over out of band. It is stored only as an Argon2 hash, so it cannot
+    be read back afterwards. Every session the user had is revoked: if the
+    reason for the reset was a compromise, leaving the attacker's refresh token
+    alive would defeat the point.
     """
-    from app.services.email import EmailSendError, build_message, send_email_or_raise
+    user = await db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No such user")
 
-    recipient = str(payload.to) if payload.to else admin.email
-    backend = settings.email_backend
-    subject, html, text = build_message("test", {"name": admin.full_name or "there"})
-
-    delivered = True
-    provider_id: str | None = None
-    detail = ""
-    try:
-        provider_id = await send_email_or_raise(
-            to=recipient, subject=subject, html=html, text=text
-        ) or None
-        detail = {
-            "resend": "Accepted by Resend. Check the inbox, and the spam folder - "
-            "landing in spam means the domain's SPF/DKIM/DMARC records need attention.",
-            "smtp": "Handed to the SMTP server.",
-            "console": "No provider configured: the message was written to the "
-            "application log instead of being sent.",
-        }[backend]
-    except EmailSendError as exc:
-        delivered = False
-        detail = str(exc)
+    # Counted BEFORE the change, because set_password revokes the sessions
+    # itself. Asking afterwards would always answer zero and the UI would
+    # cheerfully report "0 sessions signed out" every single time.
+    revoked = (
+        await db.scalar(
+            select(func.count())
+            .select_from(RefreshToken)
+            .where(RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None))
+        )
+        or 0
+    )
+    await auth_service.set_password(db, user=user, new_password=payload.new_password)
 
     await admin_log.record(
         db,
         admin_user_id=admin.id,
-        action="email.test_send",
-        target_type="email",
-        target_id=recipient,
-        metadata={
-            "backend": backend,
-            "delivered": delivered,
-            "sending_domain": settings.mail_from_domain,
-            "provider_message_id": provider_id,
-        },
+        action="user.reset_password",
+        target_type="user",
+        target_id=str(user.id),
+        # The password itself is never written to the audit trail.
+        metadata={"sessions_revoked": revoked, "reason": payload.reason or None},
         ip_address=client_ip(request),
     )
     await db.commit()
 
     log.info(
-        "admin_email_test",
+        "admin_password_reset",
         admin_id=str(admin.id),
-        to=recipient,
-        backend=backend,
-        delivered=delivered,
-        provider_message_id=provider_id,
+        user_id=str(user.id),
+        sessions_revoked=revoked,
     )
 
-    return EmailTestResult(
-        delivered=delivered,
-        backend=backend,
-        to=recipient,
-        mail_from=settings.mail_from,
-        sending_domain=settings.mail_from_domain,
-        provider_message_id=provider_id,
-        detail=detail,
+    return AdminPasswordResetResult(
+        email=user.email,
+        new_password=payload.new_password,
+        sessions_revoked=revoked,
+        detail=(
+            "Password updated and every existing session signed out. Give this "
+            "password to the user over a channel you trust - it cannot be shown again."
+        ),
     )

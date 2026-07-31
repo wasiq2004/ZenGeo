@@ -35,7 +35,6 @@ async def lifespan(_app: FastAPI):  # type: ignore[no-untyped-def]
     log.info(
         "application_start",
         environment=settings.environment,
-        email_backend=settings.email_backend,
         database_host=settings.postgres_host,
     )
     yield

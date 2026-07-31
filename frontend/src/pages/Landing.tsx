@@ -224,15 +224,24 @@ function HeroMesh() {
     <div className="absolute inset-0 -z-10 overflow-hidden" aria-hidden="true">
       <div
         className="mesh-blob animate-blob-drift-a -left-24 -top-32 size-[38rem]"
-        style={{ background: 'radial-gradient(circle, hsl(var(--primary) / 0.5), transparent 70%)' }}
+        style={{
+          background:
+            'radial-gradient(circle, color-mix(in srgb, var(--mk-cyan) 42%, transparent), transparent 70%)',
+        }}
       />
       <div
         className="mesh-blob animate-blob-drift-b -right-32 -top-16 size-[34rem]"
-        style={{ background: 'radial-gradient(circle, hsl(276 76% 62% / 0.42), transparent 70%)' }}
+        style={{
+          background:
+            'radial-gradient(circle, color-mix(in srgb, var(--mk-gold) 30%, transparent), transparent 70%)',
+        }}
       />
       <div
         className="mesh-blob animate-blob-drift-b bottom-[-14rem] left-1/3 size-[30rem] [animation-delay:-8s]"
-        style={{ background: 'radial-gradient(circle, hsl(200 85% 58% / 0.32), transparent 70%)' }}
+        style={{
+          background:
+            'radial-gradient(circle, color-mix(in srgb, var(--mk-cyan-soft) 30%, transparent), transparent 70%)',
+        }}
       />
     </div>
   )
@@ -251,7 +260,13 @@ function Hero() {
         <Stagger trigger="mount" className="mx-auto max-w-3xl text-center">
           <StaggerItem>
             <Badge variant="outline" className="mb-6 gap-1.5 py-1 pl-1.5 pr-3">
-              <span className="rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
+              <span
+                className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+                style={{
+                  background: 'color-mix(in srgb, var(--mk-cyan) 16%, transparent)',
+                  color: 'var(--mk-cyan)',
+                }}
+              >
                 Free
               </span>
               Bring your own API key — no usage caps
@@ -259,12 +274,9 @@ function Hero() {
           </StaggerItem>
 
           <StaggerItem>
-            <h1 className="text-balance text-4xl font-semibold leading-[1.1] tracking-tight sm:text-5xl md:text-6xl">
+            <h1 className="text-balance text-4xl font-extrabold leading-[1.06] tracking-[-0.03em] sm:text-5xl md:text-6xl">
               When an AI answers your customer&apos;s question,
-              <span className="bg-gradient-to-r from-primary to-purple-400 bg-clip-text text-transparent">
-                {' '}
-                is it citing you?
-              </span>
+              <span className="mk-gradient-text"> is it citing you?</span>
             </h1>
           </StaggerItem>
 
@@ -278,7 +290,7 @@ function Hero() {
 
           <StaggerItem>
             <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
-              <Button asChild size="lg" className="cta-glow w-full sm:w-auto">
+              <Button asChild size="lg" className="mk-gradient-bg cta-glow w-full border-0 text-slate-900 sm:w-auto">
                 <Link to="/signup">
                   Run your free audit <ArrowRight aria-hidden="true" />
                 </Link>
@@ -317,7 +329,7 @@ function HowItWorks() {
     <section id="how" className="border-b border-border py-20 sm:py-24">
       <div className="mx-auto max-w-6xl px-6">
         <Reveal className="max-w-2xl">
-          <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">
+          <h2 className="text-3xl font-extrabold tracking-[-0.025em] sm:text-4xl">
             Four steps, one honest number
           </h2>
           <p className="mt-3 text-pretty text-muted-foreground">
@@ -329,7 +341,7 @@ function HowItWorks() {
         <Stagger className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
           {METHOD.map((step, index) => (
             <StaggerItem key={step.title}>
-              <Card className="card-lift h-full">
+              <Card className="mk-lift h-full">
                 <CardContent className="space-y-3 p-5">
                   <span className="inline-flex size-8 items-center justify-center rounded-lg bg-primary/12 text-sm font-semibold text-primary">
                     {index + 1}
@@ -351,7 +363,7 @@ function Pillars() {
     <section id="pillars" className="border-b border-border bg-muted/25 py-20 sm:py-24">
       <div className="mx-auto max-w-6xl px-6">
         <Reveal className="max-w-2xl">
-          <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">
+          <h2 className="text-3xl font-extrabold tracking-[-0.025em] sm:text-4xl">
             Seven weighted pillars
           </h2>
           <p className="mt-3 text-pretty text-muted-foreground">
@@ -365,7 +377,7 @@ function Pillars() {
             const Icon = PILLAR_ICONS[pillar.key] ?? Gauge
             return (
               <StaggerItem key={pillar.key}>
-                <Card className="card-lift h-full">
+                <Card className="mk-lift h-full">
                   <CardContent className="space-y-3 p-5">
                     <div className="flex items-start justify-between gap-3">
                       <span className="inline-flex size-9 items-center justify-center rounded-lg bg-primary/12 text-primary">
@@ -443,7 +455,7 @@ function Byok() {
           <Badge variant="outline" className="mb-4">
             Bring your own key
           </Badge>
-          <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">
+          <h2 className="text-3xl font-extrabold tracking-[-0.025em] sm:text-4xl">
             Your keys. Your account. Your limits.
           </h2>
           <p className="mt-4 text-pretty leading-relaxed text-muted-foreground">
@@ -464,7 +476,7 @@ function Byok() {
         <Stagger className="grid gap-4 sm:grid-cols-2">
           {points.map((point) => (
             <StaggerItem key={point.title}>
-              <Card className="card-lift h-full">
+              <Card className="mk-lift h-full">
                 <CardContent className="space-y-2 p-5">
                   <point.icon className="size-4.5 text-primary" aria-hidden="true" />
                   <h3 className="text-sm font-medium">{point.title}</h3>
@@ -484,7 +496,7 @@ function Faq() {
     <section id="faq" className="border-b border-border bg-muted/25 py-20 sm:py-24">
       <div className="mx-auto max-w-3xl px-6">
         <Reveal>
-          <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">Questions</h2>
+          <h2 className="text-3xl font-extrabold tracking-[-0.025em] sm:text-4xl">Questions</h2>
         </Reveal>
         <dl className="mt-10 space-y-8">
           {FAQ.map((item, index) => (
@@ -524,7 +536,7 @@ export default function Landing() {
   const [sentinelRef, pastHero] = useScrolledPast<HTMLDivElement>()
 
   return (
-    <div className="min-h-screen bg-background font-landing">
+    <div className="mk-surface min-h-screen bg-background">
       <a
         href="#main"
         className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-primary-foreground"

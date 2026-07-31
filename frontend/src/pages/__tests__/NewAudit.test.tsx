@@ -157,20 +157,23 @@ describe('Audit wizard', () => {
     expect(body.questionnaire.goal).toBe('health_check')
   })
 
-  it('blocks the wizard entirely until the email is confirmed', async () => {
-    const unverified = { ...verifiedUser, is_email_verified: false }
+  it('opens the wizard without any email confirmation step', async () => {
+    // This deployment sends no email, so there is nothing to confirm and no
+    // gate in front of the wizard. An account with the flag unset must still
+    // reach the form - the inverse of what this test used to assert.
+    const unconfirmed = { ...verifiedUser, is_email_verified: false }
     vi.stubGlobal(
       'fetch',
       mockFetch({
-        'POST /auth/refresh': { body: session(unverified) },
-        'GET /auth/me': { body: unverified },
+        'POST /auth/refresh': { body: session(unconfirmed) },
+        'GET /auth/me': { body: unconfirmed },
         'GET /businesses': { body: [] },
         'GET /llm-keys': { body: [] },
       }),
     )
     await renderWithProviders(<NewAudit />)
 
-    expect(await screen.findByText(/confirm your email first/i)).toBeInTheDocument()
-    expect(screen.queryByLabelText(/business or brand name/i)).not.toBeInTheDocument()
+    expect(await screen.findByLabelText(/business or brand name/i)).toBeInTheDocument()
+    expect(screen.queryByText(/confirm your email/i)).not.toBeInTheDocument()
   })
 })

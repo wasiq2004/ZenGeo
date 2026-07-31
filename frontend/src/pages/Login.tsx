@@ -118,14 +118,9 @@ export default function Login() {
           </Field>
         )}
 
-        <div className="flex justify-end">
-          <Link
-            to="/forgot-password"
-            className="text-xs text-muted-foreground transition-colors hover:text-foreground"
-          >
-            Forgot your password?
-          </Link>
-        </div>
+        {/* No "forgot password" link: this deployment sends no email, so there
+            is no self-service reset. An administrator sets a new password and
+            hands it over directly. */}
 
         <Button type="submit" className="w-full" loading={isSubmitting}>
           Sign in

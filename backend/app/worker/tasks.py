@@ -83,45 +83,6 @@ async def _mark_failed(audit_id: uuid.UUID) -> None:
             await db.commit()
 
 
-@celery_app.task(
-    name="geo.send_email",
-    bind=True,
-    # Unlike an audit, re-sending is cheap and idempotent from the user's point
-    # of view, so a transient provider outage is worth retrying through.
-    # Backoff is capped and jittered so a Resend incident does not turn our
-    # whole queue into a synchronised retry storm against them.
-    autoretry_for=(Exception,),
-    retry_backoff=10,
-    retry_backoff_max=600,
-    retry_jitter=True,
-    max_retries=5,
-    acks_late=True,
-)
-def send_email_task(self, kind: str, to: str, context: dict[str, object]) -> str:  # type: ignore[no-untyped-def]
-    """Render and send one transactional message.
-
-    The payload is the render context, not a rendered body - it keeps the queue
-    entry small, and a template fix reaches anything still waiting in it.
-    """
-    from app.services.email import send_now
-
-    try:
-        message_id = run_in_loop(send_now(kind, to=to, context=context))
-    except Exception as exc:
-        log.warning(
-            "email_task_retrying",
-            kind=kind,
-            to=to,
-            attempt=self.request.retries + 1,
-            max_retries=self.max_retries,
-            error=str(exc),
-        )
-        raise
-
-    log.info("email_task_done", kind=kind, to=to, provider_id=message_id or None)
-    return message_id
-
-
 @celery_app.task(name="geo.regenerate_report")
 def regenerate_report(audit_id: str) -> str:
     """Rebuild a PDF without re-running the audit (and without re-spending)."""

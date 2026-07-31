@@ -12,9 +12,6 @@ import { QueryProvider } from '@/lib/query'
 const Landing = lazy(() => import('@/pages/Landing'))
 const Login = lazy(() => import('@/pages/Login'))
 const Signup = lazy(() => import('@/pages/Signup'))
-const ForgotPassword = lazy(() => import('@/pages/ForgotPassword'))
-const ResetPassword = lazy(() => import('@/pages/ResetPassword'))
-const VerifyEmail = lazy(() => import('@/pages/VerifyEmail'))
 const NotFound = lazy(() => import('@/pages/NotFound'))
 
 const UserLayout = lazy(() => import('@/components/layout/UserLayout'))
@@ -60,9 +57,6 @@ export default function App() {
                       </PublicOnlyRoute>
                     }
                   />
-                  <Route path="/forgot-password" element={<ForgotPassword />} />
-                  <Route path="/reset-password" element={<ResetPassword />} />
-                  <Route path="/verify-email" element={<VerifyEmail />} />
 
                   {/* User panel */}
                   <Route

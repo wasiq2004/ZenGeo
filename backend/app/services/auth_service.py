@@ -23,7 +23,7 @@ from app.core.security import (
     password_needs_rehash,
     verify_password,
 )
-from app.db.models.user import RefreshToken, TokenPurpose, User, UserRole, UserToken
+from app.db.models.user import RefreshToken, User, UserRole
 
 log = get_logger("auth")
 
@@ -88,13 +88,9 @@ async def create_user(
         raise EmailAlreadyRegistered()
 
     if email_verified is None:
-        # With REQUIRE_EMAIL_VERIFICATION=false there is no verification step to
-        # complete, so leaving the flag False would strand every account in a
-        # state nothing can clear: the API gate is lifted, but the UI still
-        # shows "confirm your email" and refuses to open the audit form. Marking
-        # them verified up front keeps the flag as the single switch that turns
-        # the whole feature off - useful when no mail transport is configured.
-        email_verified = not settings.require_email_verification
+        # There is no verification step in this deployment - no mail is sent, so
+        # nothing could ever clear the flag. Accounts are created usable.
+        email_verified = True
 
     user = User(
         email=email,
@@ -290,58 +286,6 @@ async def revoke_all_sessions(db: AsyncSession, user_id: uuid.UUID) -> int:
 # --------------------------------------------------------------------------- #
 # One-shot email tokens
 # --------------------------------------------------------------------------- #
-async def create_user_token(
-    db: AsyncSession, *, user: User, purpose: TokenPurpose
-) -> str:
-    """Issue a single-use token, invalidating any outstanding one of the same kind."""
-    await db.execute(
-        update(UserToken)
-        .where(
-            UserToken.user_id == user.id,
-            UserToken.purpose == purpose,
-            UserToken.used_at.is_(None),
-        )
-        .values(used_at=datetime.now(UTC))
-    )
-    raw = generate_opaque_token(32)
-    ttl = (
-        {"hours": settings.email_token_ttl_hours}
-        if purpose is TokenPurpose.email_verification
-        else {"minutes": settings.password_reset_ttl_minutes}
-    )
-    db.add(
-        UserToken(
-            user_id=user.id,
-            token_hash=hash_token(raw),
-            purpose=purpose,
-            expires_at=expiry(**ttl),
-        )
-    )
-    await db.flush()
-    return raw
-
-
-async def consume_user_token(
-    db: AsyncSession, *, raw_token: str, purpose: TokenPurpose
-) -> User:
-    record = await db.scalar(
-        select(UserToken).where(
-            UserToken.token_hash == hash_token(raw_token), UserToken.purpose == purpose
-        )
-    )
-    now = datetime.now(UTC)
-    if record is None or record.used_at is not None or record.expires_at <= now:
-        raise InvalidToken()
-
-    user = await db.get(User, record.user_id)
-    if user is None or not user.is_active:
-        raise InvalidToken()
-
-    record.used_at = now
-    await db.flush()
-    return user
-
-
 async def set_password(db: AsyncSession, *, user: User, new_password: str) -> None:
     """Change a password and invalidate every existing session."""
     user.password_hash = hash_password(new_password)

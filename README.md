@@ -14,7 +14,7 @@ free and keeps anyone from imposing a limit on how much a user tests.
 
 - [What it measures](#what-it-measures)
 - [Database](#database)
-- [Email delivery](#email-delivery)
+- [Accounts and access](#accounts-and-access)
 - [Quick start (local)](#quick-start-local)
 - [First admin](#first-admin)
 - [Connecting an AI provider key](#connecting-an-ai-provider-key)
@@ -144,94 +144,41 @@ rather than failing, which is why the production check inspects both.
 
 ---
 
-## Email delivery
+## Accounts and access
 
-Transactional mail (verification, password reset, email-change notice, audit
-complete) goes through **Resend**. The transport is chosen automatically:
+**No email is sent, ever.** There is no Resend key, no SMTP configuration and no
+verification step: an account is usable from the moment it is created. Sign up,
+sign in, run an audit.
 
-| Condition | Transport |
-|---|---|
-| `RESEND_API_KEY` set | Resend HTTP API |
-| Only `SMTP_HOST` set | SMTP |
-| Neither | Console — written to the backend log, never sent |
+That is a deliberate trade, and it costs one thing — **there is no self-service
+password reset.** A reset link needs somewhere to be delivered, and there is
+nowhere. So recovery is an administrator action instead:
 
-`RESEND_API_KEY` is **required in production**; the app refuses to boot without
-it, because the console backend silently swallowing a password-reset link is the
-kind of failure nobody notices until a user cannot get back in.
+**Admin → Users → (pick the user) → Reset password.**
 
-```dotenv
-RESEND_API_KEY=re_...
-MAIL_FROM=CheckGEO.ai <no-reply@yourdomain.example>
-```
+The admin types the new password, it is shown back exactly once so it can be
+passed on over a channel you already trust, and every existing session for that
+user is signed out at the same time — if the reason for the reset was a
+compromise, leaving the attacker's refresh token alive would defeat the point.
+The password is stored only as an Argon2 hash and is never written to the audit
+trail; the trail records who did it, when, and the reason they typed.
 
-`MAIL_FROM` is parsed with the stdlib RFC 5322 parser into a display name and a
-bare address, and sent as Resend's `from`. Production also rejects a
-`MAIL_FROM` that is malformed, still on `example.com`, or missing a display name.
+This makes the first admin account matter more than usual. If you lose *its*
+password, nothing in the product can recover it — you would reset it directly
+against the database. Keep those credentials somewhere durable.
 
-### Required first-deploy step: verify the sending domain
+Signed-in users can still change their own password (authenticated by the
+current one) and their own email address (authenticated by their password) from
+Settings. Neither sends a notification, because there is nothing to send it
+with.
 
-**Sends from an unverified domain are rejected or land in spam.** This cannot be
-done from the codebase — it is a dashboard-and-DNS job, and it must happen before
-the first real signup:
+### Turning email back on
 
-1. In the [Resend dashboard](https://resend.com/domains), add the domain part of
-   your `MAIL_FROM` address as a sending domain.
-2. Resend shows a set of DNS records. Publish all of them at whoever hosts that
-   domain's DNS:
-   - **SPF** — a `TXT` record authorising Resend to send for the domain.
-   - **DKIM** — the `CNAME`/`TXT` records Resend gives you. This is what
-     cryptographically signs your mail; without it you are unauthenticated.
-   - **DMARC** — a `_dmarc` `TXT` record. Start at `p=none` while you confirm
-     delivery, then tighten to `p=quarantine` and eventually `p=reject`.
-     Publishing DKIM and SPF without DMARC leaves receivers no policy to apply.
-3. Wait for the dashboard to show the domain **Verified**. DNS propagation is
-   usually minutes but can take hours.
-4. Confirm end to end with the test-send endpoint below — do not wait for a real
-   user to discover it is broken.
-
-### Confirming it works after deploy
-
-```bash
-curl -X POST https://your-domain/api/v1/admin/email/test-send \
-     -H "Authorization: Bearer $ADMIN_ACCESS_TOKEN" \
-     -H 'Content-Type: application/json' \
-     -d '{}'                      # omit "to" and it goes to your own address
-```
-
-Admin-only, rate-limited to 10/hour, and written to the admin audit log — it can
-be pointed at an arbitrary address, so it is treated as a privileged action. It
-sends synchronously and reports the provider's answer rather than queueing, so a
-failure surfaces in the response instead of a worker log:
-
-```json
-{
-  "delivered": true,
-  "backend": "resend",
-  "to": "admin@yourdomain.example",
-  "sending_domain": "yourdomain.example",
-  "provider_message_id": "4ef9a417-…",
-  "detail": "Accepted by Resend. Check the inbox, and the spam folder …"
-}
-```
-
-`delivered: true` means Resend *accepted* the message. Landing in spam is a
-separate problem, and it means the SPF/DKIM/DMARC records need attention.
-
-### How sends are queued
-
-Everything except the test endpoint goes through the Celery worker, so a slow or
-failing provider never holds up the request that triggered it. The task retries
-up to 5 times with jittered exponential backoff (10s, capped at 10 minutes) —
-jittered so a provider incident does not turn the queue into a synchronised
-retry storm. Each send logs the Resend message id and HTTP status.
-
-The queue payload is the render context, not a rendered body: it keeps the Redis
-entry small, and a template fix reaches anything still waiting. If the broker is
-unreachable the message is sent inline instead — losing a verification link
-silently is worse than a slow signup.
-
----
-
+Nothing here is load-bearing in a way that blocks it. Adding a transport means:
+a mail service module, a Celery task to send through it, and the two flows that
+were removed — a verification token on signup and a `/password-reset` pair.
+`users.is_email_verified` is still on the model and still exported, so a
+verification gate has somewhere to hang. Everything else is unchanged.
 ## Quick start (local)
 
 Requirements: Docker and Docker Compose. Nothing else.
@@ -469,8 +416,8 @@ make prod-psql             # or: .\geo.ps1 prod-psql
 
 The app refuses to start in production with placeholder secrets, a plain-HTTP
 `FRONTEND_URL`, `ALLOW_PRIVATE_NETWORK_FETCH=true`, a `POSTGRES_SSLMODE` weaker
-than `require`, or a missing `RESEND_API_KEY`. That is deliberate: those are the
-mistakes worth failing loudly on.
+than `require`. That is deliberate: those are the mistakes worth failing loudly
+on.
 
 ### Firewall
 
@@ -787,9 +734,9 @@ Browser ──HTTPS──> Traefik ──plain──> Caddy :8080         │
                                          │ HTTPS
                         ┌────────────────┴────────────────┐
                         ▼                                 ▼
-                  Resend API                 the sites being audited
-              (transactional mail)           + the LLM providers
-                                               (user's own keys)
+                                    the sites being audited
+                                    + the LLM providers
+                                      (user's own keys)
 ```
 
 Caddy publishes no ports at all — Traefik reaches it over `dokploy-network`,
@@ -806,7 +753,6 @@ service names.
 - **Database** — Postgres 16 in a container, reached over TLS on the Compose
   network and never published to the host; see [Database](#database). Moving it
   to its own machine later is [Self-hosted database VPS](#self-hosted-database-vps).
-- **Email** — Resend, sent from the worker; see [Email delivery](#email-delivery).
 
 Caddy is the only container that publishes ports.
 
@@ -1010,39 +956,20 @@ unreachable, or the SSRF guard refused it. The per-stage event log on the audit
 page gives the reason. Auditing a site on your own machine needs
 `ALLOW_PRIVATE_NETWORK_FETCH=true`, which only works outside production.
 
-**"Confirm your email before running an audit".** Nobody can complete that step
-if mail is not actually being delivered. Two ways out.
+**A user cannot sign in and there is no reset link.** There is no self-service
+reset on this deployment — see [Accounts and access](#accounts-and-access). An
+admin sets a new password from the user's detail page, which also signs out
+every session that user had.
 
-*If you have a working transport* and are only missing it locally, the console
-backend writes the link to the log instead of sending it:
-
-```bash
-docker compose logs backend | grep -A3 email_console_backend
-```
-
-*If you have no transport at all* — no verified Resend sending domain and no
-SMTP — turn the requirement off:
-
-```dotenv
-REQUIRE_EMAIL_VERIFICATION=false
-```
-
-New accounts are then created already marked verified, so the API gate, the
-dashboard banner and the audit form all treat them as confirmed, and signup
-stops trying to send a link that cannot arrive. Accounts created *before* you
-flipped it keep `is_email_verified = false`, and the frontend still blocks
-those, so clear them once:
+If it is the *admin* account that is locked out, nothing in the product can help
+— reset the hash directly:
 
 ```bash
-docker compose -f docker-compose.prod.yml exec -T postgres sh -c \
-  'PGPASSWORD="$POSTGRES_PASSWORD" psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
-   -c "UPDATE users SET is_email_verified = true WHERE is_email_verified = false"'
+docker compose -f docker-compose.prod.yml exec -T postgres sh -c   'PGPASSWORD="$POSTGRES_PASSWORD" psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"    -c "DELETE FROM users WHERE email = '"'"'admin@example.com'"'"'"'
 ```
 
-**Password reset stays broken while mail is down** — the link has nowhere to go.
-Until a transport works, an admin has to reset a locked-out user by hand. Fixing
-delivery is the real answer: verify the sending domain in Resend, or set
-`SMTP_HOST` and friends.
+then redeploy: the one-shot `init` service re-seeds the first admin from
+`FIRST_ADMIN_EMAIL` / `FIRST_ADMIN_PASSWORD`.
 
 **Share of Voice always skipped.** Either no active API key, or no target
 prompts in the questionnaire. Both are reported in the skip reason.
