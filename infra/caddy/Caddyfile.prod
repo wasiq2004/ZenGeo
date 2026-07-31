@@ -39,10 +39,14 @@
 
 	# Health probes for external uptime monitoring.
 	#   /health  - the process is up
-	#   /healthz - the database host is reachable from here. Point the uptime
-	#              monitor at this one: the database is on a separate box, so
-	#              the link between them can fail while the app is fine.
-	handle /health /healthz {
+	#   /healthz - the database is reachable from the API container. Point the
+	#              uptime monitor at this one: it exercises the whole path.
+	#
+	# A named matcher, not `handle /health /healthz`: `handle` takes exactly one
+	# matcher token, and the two-path form is a config-adapter error that stops
+	# Caddy from starting at all.
+	@probes path /health /healthz
+	handle @probes {
 		reverse_proxy backend:8000
 	}
 

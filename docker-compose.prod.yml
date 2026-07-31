@@ -1,45 +1,53 @@
 # =============================================================================
-# PRODUCTION stack for a single VPS - standalone, and fully self-contained:
-# database, cache, API, worker, frontend and TLS proxy all run here. One
-# command brings the whole thing up, migrations and first admin included:
+# PRODUCTION stack, deployed by Dokploy on a 1 vCPU VPS.
+#
+# Self-contained: database, cache, API, worker, frontend and the internal
+# router all run from this one file, and a one-shot `init` service applies the
+# migrations and creates the first admin. It does NOT layer on
+# docker-compose.yml - a single -f is all it ever needs.
 #
 #   docker compose -f docker-compose.prod.yml up -d --build
 #
-# (or: make prod-up / .\geo.ps1 prod-up)
-#
-# This file does NOT layer on top of docker-compose.yml - it repeats everything
-# it needs, so a deploy tool that accepts only a single compose file can be
-# pointed straight at it. The trade is duplication: when you change a service in
-# docker-compose.yml, check whether this file needs the same edit.
-#
-# Adds over development: published 80/443, resource limits, read-only root
-# filesystems, dropped capabilities, no new privileges, and log rotation.
-#
 # ---------------------------------------------------------------------------
-# The database runs HERE, in a container, on this box.
+# Dokploy owns ports 80 and 443.
 #
-# That is a deliberate trade for one-command deployment, and it costs you the
-# things a separate database host was buying:
-#   * Losing this VPS loses the application AND the data with it. Backups are
-#     no longer a nice-to-have - set BACKUP_REMOTE and run infra/backup/pg_backup.sh
-#     on a cron, or you have no recovery story at all.
-#   * `docker compose down -v` here deletes the production database. The project
-#     name below is deliberately different from the development stack's so that
-#     a stray dev-file command cannot reach these volumes.
+# Its Traefik terminates TLS and issues the Let's Encrypt certificate, so
+# nothing here publishes a port and nothing here requests a certificate. The
+# `caddy` service is an INTERNAL router only: it takes plain HTTP from Traefik
+# on :8080 and splits the hostname across the API and the SPA.
+#
+# In Dokploy, add ONE domain:
+#     Domain     zgeoai.zenautomations.in
+#     Service    caddy
+#     Port       8080
+#     HTTPS      on  (Let's Encrypt)
+# Do not add domain entries for `backend` or `frontend` - Caddy already routes
+# between them, and a second entry would fight it for the same hostname.
 # ---------------------------------------------------------------------------
 #
-# The reverse proxy is Caddy rather than Nginx - on a single VPS it gets
-# automatic Let's Encrypt TLS with a three-line config (spec section 11).
+# ---------------------------------------------------------------------------
+# Sized for 1 vCPU.
 #
-# Requires a populated .env in this directory (see .env.example). Point the
-# domain's A record at this box BEFORE the first start, or Caddy's initial
-# certificate order fails.
+# `deploy.resources.limits.cpus` is a hard per-container ceiling and Docker
+# refuses any value above the host's core count - a 1.5 here is what made the
+# first deploy fail with "range of CPUs is from 0.01 to 1.00". Every value below
+# is <= 1.00. They are ceilings, not reservations, so they do not need to sum to
+# 1.00; a container simply cannot exceed its own line.
+#
+# Memory totals roughly 2.2 GB across the stack, leaving room for Dokploy,
+# Traefik and the OS on a 4 GB box. On a 2 GB box, halve `backend`, `worker`
+# and `postgres` and drop the worker to --concurrency=1.
+# ---------------------------------------------------------------------------
+#
+# The database runs HERE, in a container, on this box. Losing the VPS loses the
+# application AND the data. Backups are not optional: set BACKUP_REMOTE and put
+# infra/backup/pg_backup.sh on a cron.
 # =============================================================================
 
-# Deliberately NOT "geo-audit": that is the development project name, and both
-# stacks declare a `postgres_data` volume. Sharing a project name would mean
-# `docker compose down -v` run against the development file on this box wipes
-# the production database.
+# Dokploy generates its own project name per deployment, so this is mostly
+# cosmetic there. It still matters if you ever run the file by hand: it must not
+# collide with the development stack's "geo-audit", because both declare a
+# postgres_data volume and `down -v` would take the wrong database.
 name: geo-audit-prod
 
 x-logging: &logging
@@ -72,9 +80,9 @@ services:
     image: postgres:16
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
-      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env}
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in the Dokploy Environment tab}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in the Dokploy Environment tab}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in the Dokploy Environment tab}
       # Consumed by the init hooks below to create the least-privilege role and
       # to rewrite pg_hba.conf so plain-TCP connections are refused outright.
       # The development stack leaves REQUIRE_TLS unset, because its Postgres
@@ -117,12 +125,11 @@ services:
       retries: 10
       start_period: 30s
     # Deliberately no `ports:` - the database is reachable only from this
-    # compose network. Use `docker compose -f docker-compose.prod.yml exec
-    # postgres psql` for a session; do not publish 5432.
+    # compose network. Never publish 5432.
     shm_size: 256mb
     deploy:
       resources:
-        limits: {cpus: "1.5", memory: 1g}
+        limits: {cpus: "0.75", memory: 512m}
     logging: *logging
     networks: [internal]
 
@@ -140,12 +147,12 @@ services:
     security_opt: ["no-new-privileges:true"]
     deploy:
       resources:
-        limits: {cpus: "0.5", memory: 384m}
+        limits: {cpus: "0.25", memory: 192m}
     logging: *logging
     networks: [internal]
 
   # One-shot job: applies migrations, then creates or promotes the first admin.
-  # backend and worker wait for it to exit 0, so a single `up` yields a working
+  # backend and worker wait for it to exit 0, so a single deploy yields a working
   # login rather than an empty schema. Both steps are idempotent, so it is safe
   # that this re-runs on every deploy.
   init:
@@ -165,6 +172,9 @@ services:
     tmpfs: ["/tmp:size=64m"]
     security_opt: ["no-new-privileges:true"]
     cap_drop: ["ALL"]
+    deploy:
+      resources:
+        limits: {cpus: "1.00", memory: 512m}
     logging: *logging
     networks: [internal]
 
@@ -195,7 +205,7 @@ services:
     cap_drop: ["ALL"]
     deploy:
       resources:
-        limits: {cpus: "1.5", memory: 1g}
+        limits: {cpus: "0.75", memory: 640m}
     logging: *logging
     networks: [internal]
 
@@ -207,13 +217,16 @@ services:
     restart: unless-stopped
     env_file: [.env]
     environment: *backend-env
+    # --concurrency=2 rather than 4: on a single core, more workers buy nothing
+    # and each one is a whole Python process holding its own memory. Audits are
+    # IO-bound (fetching pages, waiting on LLM APIs), so two overlap usefully.
     command:
       - celery
       - -A
       - app.worker.celery_app.celery_app
       - worker
       - --loglevel=info
-      - --concurrency=4
+      - --concurrency=2
       - --max-tasks-per-child=50
     volumes:
       - reports_data:/data/reports
@@ -234,7 +247,7 @@ services:
     cap_drop: ["ALL"]
     deploy:
       resources:
-        limits: {cpus: "2", memory: 1500m}
+        limits: {cpus: "1.00", memory: 768m}
     logging: *logging
     networks: [internal]
 
@@ -252,40 +265,33 @@ services:
     # nginx user, which needs the default capability set to stay intact.
     deploy:
       resources:
-        limits: {cpus: "0.5", memory: 256m}
+        limits: {cpus: "0.25", memory: 96m}
     logging: *logging
     networks: [internal]
 
   caddy:
+    # Internal router only. Traefik terminates TLS and forwards plain HTTP here;
+    # this splits /api and /health* to the backend and everything else to the
+    # SPA, and applies the security headers. No ports, no ACME.
     image: caddy:2-alpine
     restart: unless-stopped
     depends_on: [backend, frontend]
-    environment:
-      # `:?` fails the command with this message rather than starting Caddy with
-      # a blank domain - which would silently serve nothing and never obtain a
-      # certificate.
-      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:?set PUBLIC_DOMAIN in .env}
-      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
     volumes:
-      - ./infra/caddy/Caddyfile.prod:/etc/caddy/Caddyfile:ro
-      # caddy_data holds the issued certificates - losing it means re-ordering
-      # them from Let's Encrypt, against a rate limit. Keep the volume.
+      - ./infra/caddy/Caddyfile.dokploy:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
-    ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"   # HTTP/3
     security_opt: ["no-new-privileges:true"]
     deploy:
       resources:
-        limits: {cpus: "0.5", memory: 256m}
+        limits: {cpus: "0.25", memory: 96m}
     logging: *logging
-    networks: [internal, edge]
+    # `internal` to reach backend and frontend; `dokploy-network` so Traefik can
+    # reach this container. It is the ONLY service on both.
+    networks: [internal, dokploy-network]
 
 volumes:
   # postgres_data is the production database. Nothing else on this box should
-  # ever be allowed to remove it - see the project-name note at the top.
+  # ever be allowed to remove it.
   postgres_data:
   postgres_certs:
   redis_data:
@@ -294,7 +300,8 @@ volumes:
   caddy_config:
 
 networks:
-  # Nothing on `internal` is published to the host.
+  # Nothing on `internal` is reachable from outside this stack.
   internal:
-  # Only the proxy joins `edge`, which is the network with published ports.
-  edge:
+  # Created and owned by Dokploy - this stack joins it, it does not define it.
+  dokploy-network:
+    external: true

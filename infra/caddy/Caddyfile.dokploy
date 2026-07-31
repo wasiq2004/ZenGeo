@@ -1,0 +1,78 @@
+# Caddy behind Dokploy's Traefik.
+#
+# Dokploy owns ports 80 and 443 on the VPS and terminates TLS itself, so this
+# Caddy does NOT request certificates and does NOT bind a public port. It exists
+# for one reason: it is the single container that knows how to split one
+# hostname across two backends -
+#
+#   /api/*, /health*, /healthz  ->  FastAPI
+#   everything else             ->  the static SPA
+#
+# That keeps Dokploy's side to a single domain entry (service `caddy`, port
+# 8080) instead of hand-written path-based Traefik rules, and keeps the
+# security headers in a file you can read.
+#
+# Traffic path:  client --TLS--> Traefik --plain--> Caddy:8080 --> app
+
+{
+	# Traefik already did TLS. Asking Caddy for a certificate here would fail:
+	# it cannot complete an ACME challenge on ports it does not own.
+	auto_https off
+	admin off
+
+	servers {
+		# Traefik sits in front on a private Docker network and sets
+		# X-Forwarded-For with the real client address. Trusting private ranges
+		# lets Caddy read that value instead of seeing Traefik as the client.
+		trusted_proxies static private_ranges
+	}
+}
+
+:8080 {
+	encode zstd gzip
+
+	header {
+		# Served over HTTPS by Traefik, so HSTS is still correct here.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "geolocation=(), microphone=(), camera=(), payment=()"
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+		-Server
+	}
+
+	# The API. FastAPI's own docs are disabled when ENVIRONMENT=production.
+	#
+	# Deliberately NO `header_up X-Forwarded-For {remote_host}` here. Overwriting
+	# it would replace the real client address with Traefik's container IP, and
+	# the login/signup rate limiters key on that value - every visitor would
+	# share one bucket. Caddy's default is to append, so the header stays
+	# "<real client>, <traefik>" and the backend's first-entry read still gets
+	# the right address. X-Forwarded-Proto is passed through by default too.
+	@api path /api/*
+	handle @api {
+		reverse_proxy backend:8000
+	}
+
+	# Health probes for external uptime monitoring.
+	#   /health  - the process is up
+	#   /healthz - the database is reachable from the API container
+	#
+	# A named matcher, not `handle /health /healthz`: `handle` takes exactly one
+	# matcher token, and the two-path form is a config-adapter error.
+	@probes path /health /healthz
+	handle @probes {
+		reverse_proxy backend:8000
+	}
+
+	# Static SPA build.
+	handle {
+		reverse_proxy frontend:80
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}
