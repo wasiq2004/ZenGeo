@@ -101,16 +101,24 @@ async def signup(
     except AuthError as exc:
         raise _http_error(exc) from exc
 
-    token = await auth_service.create_user_token(
-        db, user=user, purpose=TokenPurpose.email_verification
+    # No verification step means no token and no message: the account is already
+    # usable, and sending a link that confirms something nothing checks would
+    # only fail loudly in the log on a deployment with no mail transport.
+    token = (
+        await auth_service.create_user_token(
+            db, user=user, purpose=TokenPurpose.email_verification
+        )
+        if settings.require_email_verification
+        else None
     )
     session = await _issue_session(db, response, request, user)
     await db.commit()
 
     # Sent after commit so a mail failure cannot roll back the new account.
-    await email_service.send_verification_email(
-        to=user.email, name=user.full_name, token=token
-    )
+    if token is not None:
+        await email_service.send_verification_email(
+            to=user.email, name=user.full_name, token=token
+        )
     return session
 
 

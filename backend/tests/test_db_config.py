@@ -25,7 +25,11 @@ def make_settings(**overrides: object) -> Settings:
         "app_db_password": "runtime-secret",
     }
     base.update(overrides)
-    return Settings(**base)  # type: ignore[arg-type]
+    # _env_file=None keeps a developer's real .env out of these assertions.
+    # Without it, Settings still loads .env for anything `base` does not set, so
+    # a populated RESEND_API_KEY there silently turned the transport-selection
+    # and production-guard cases green-or-red depending on the machine.
+    return Settings(_env_file=None, **base)  # type: ignore[arg-type]
 
 
 class TestDsnConstruction:

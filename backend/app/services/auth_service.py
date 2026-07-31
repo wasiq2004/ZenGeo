@@ -81,11 +81,20 @@ async def create_user(
     password: str,
     full_name: str | None = None,
     role: UserRole = UserRole.user,
-    email_verified: bool = False,
+    email_verified: bool | None = None,
 ) -> User:
     existing = await db.scalar(select(User).where(User.email == email))
     if existing:
         raise EmailAlreadyRegistered()
+
+    if email_verified is None:
+        # With REQUIRE_EMAIL_VERIFICATION=false there is no verification step to
+        # complete, so leaving the flag False would strand every account in a
+        # state nothing can clear: the API gate is lifted, but the UI still
+        # shows "confirm your email" and refuses to open the audit form. Marking
+        # them verified up front keeps the flag as the single switch that turns
+        # the whole feature off - useful when no mail transport is configured.
+        email_verified = not settings.require_email_verification
 
     user = User(
         email=email,

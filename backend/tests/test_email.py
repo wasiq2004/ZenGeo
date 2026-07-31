@@ -23,9 +23,19 @@ def make_settings(**overrides: object) -> Settings:
         "postgres_password": "owner-secret",
         "app_db_user": "geo_runtime",
         "app_db_password": "runtime-secret",
+        # Pinned empty so a real transport cannot leak in and decide the answer
+        # for us. These tests run inside the backend container, whose
+        # environment IS the deployment's .env - so a populated RESEND_API_KEY
+        # there made "smtp is the fallback", "console when nothing is
+        # configured" and "production requires a key" pass or fail depending on
+        # the machine rather than on the code. Any test that wants a transport
+        # passes it explicitly as an override.
+        "resend_api_key": "",
+        "smtp_host": "",
     }
     base.update(overrides)
-    return Settings(**base)  # type: ignore[arg-type]
+    # _env_file=None stops .env being read directly on top of that.
+    return Settings(_env_file=None, **base)  # type: ignore[arg-type]
 
 
 class FakeResponse:

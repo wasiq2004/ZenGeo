@@ -1010,14 +1010,39 @@ unreachable, or the SSRF guard refused it. The per-stage event log on the audit
 page gives the reason. Auditing a site on your own machine needs
 `ALLOW_PRIVATE_NETWORK_FETCH=true`, which only works outside production.
 
-**"Confirm your email before running an audit".** With no SMTP configured, the
-verification link is written to the backend log instead of being emailed:
+**"Confirm your email before running an audit".** Nobody can complete that step
+if mail is not actually being delivered. Two ways out.
+
+*If you have a working transport* and are only missing it locally, the console
+backend writes the link to the log instead of sending it:
 
 ```bash
 docker compose logs backend | grep -A3 email_console_backend
 ```
 
-Set `SMTP_HOST` and friends to send real mail.
+*If you have no transport at all* — no verified Resend sending domain and no
+SMTP — turn the requirement off:
+
+```dotenv
+REQUIRE_EMAIL_VERIFICATION=false
+```
+
+New accounts are then created already marked verified, so the API gate, the
+dashboard banner and the audit form all treat them as confirmed, and signup
+stops trying to send a link that cannot arrive. Accounts created *before* you
+flipped it keep `is_email_verified = false`, and the frontend still blocks
+those, so clear them once:
+
+```bash
+docker compose -f docker-compose.prod.yml exec -T postgres sh -c \
+  'PGPASSWORD="$POSTGRES_PASSWORD" psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+   -c "UPDATE users SET is_email_verified = true WHERE is_email_verified = false"'
+```
+
+**Password reset stays broken while mail is down** — the link has nowhere to go.
+Until a transport works, an admin has to reset a locked-out user by hand. Fixing
+delivery is the real answer: verify the sending domain in Resend, or set
+`SMTP_HOST` and friends.
 
 **Share of Voice always skipped.** Either no active API key, or no target
 prompts in the questionnaire. Both are reported in the skip reason.
