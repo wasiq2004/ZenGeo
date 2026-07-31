@@ -1,0 +1,17 @@
+{% extends "_base.html" %}
+{% block subject %}CheckGEO.ai test message{% endblock %}
+{% block content %}
+<h1 style="margin:0 0 12px 0;font-size:21px;font-weight:650;color:#ffffff;letter-spacing:-0.015em;">
+  Mail delivery is working
+</h1>
+<p style="margin:0 0 20px 0;color:#c3c9d8;">
+  Hi {{ name }} — this is a test message triggered from the admin panel.
+</p>
+<p style="margin:0 0 20px 0;color:#c3c9d8;">
+  If it reached your inbox rather than your spam folder, the provider is configured
+  correctly and the sending domain's SPF, DKIM and DMARC records are in place.
+</p>
+<p style="margin:0;color:#6b7488;font-size:13px;border-top:1px solid #232a3d;padding-top:16px;">
+  No action is needed. Nobody else received this message.
+</p>
+{% endblock %}

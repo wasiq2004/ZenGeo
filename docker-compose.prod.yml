@@ -1,0 +1,72 @@
+# Production overlay for a single VPS.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# Adds: published 80/443, resource limits, read-only root filesystems, dropped
+# capabilities, no new privileges, and log rotation.
+
+# There is no `postgres` service: production connects to an external managed
+# Postgres over TLS (DATABASE_URL). Nothing here should ever reintroduce one -
+# a container on the same box would quietly become the real database.
+
+services:
+  redis:
+    security_opt: ["no-new-privileges:true"]
+    deploy:
+      resources:
+        limits: {cpus: "0.5", memory: 384m}
+    logging: &logging
+      driver: json-file
+      options: {max-size: "10m", max-file: "5"}
+
+  backend:
+    environment:
+      ENVIRONMENT: production
+      LOG_FORMAT: json
+    read_only: true
+    tmpfs: ["/tmp:size=64m"]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    deploy:
+      resources:
+        limits: {cpus: "1.5", memory: 1g}
+    logging: *logging
+
+  worker:
+    environment:
+      ENVIRONMENT: production
+      LOG_FORMAT: json
+    read_only: true
+    # WeasyPrint writes font caches to /tmp while rendering the PDF.
+    tmpfs: ["/tmp:size=256m"]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    deploy:
+      resources:
+        limits: {cpus: "2", memory: 1500m}
+    logging: *logging
+
+  frontend:
+    security_opt: ["no-new-privileges:true"]
+    deploy:
+      resources:
+        limits: {cpus: "0.5", memory: 256m}
+    logging: *logging
+
+  caddy:
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3
+    environment:
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+    volumes:
+      - ./infra/caddy/Caddyfile.prod:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    security_opt: ["no-new-privileges:true"]
+    deploy:
+      resources:
+        limits: {cpus: "0.5", memory: 256m}
+    logging: *logging

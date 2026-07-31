@@ -1,0 +1,47 @@
+# Dependencies are pinned exactly, so they only move when Dependabot opens a PR
+# and CI (including pip-audit and npm audit) goes green on it.
+version: 2
+
+updates:
+  - package-ecosystem: pip
+    directory: /backend
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      # One PR for the routine patch churn, individual PRs for anything larger.
+      patch-updates:
+        update-types: [patch]
+    labels: [dependencies, backend]
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      patch-updates:
+        update-types: [patch]
+      radix:
+        patterns: ['@radix-ui/*']
+    labels: [dependencies, frontend]
+
+  - package-ecosystem: docker
+    directory: /backend
+    schedule:
+      interval: weekly
+    labels: [dependencies, docker]
+
+  - package-ecosystem: docker
+    directory: /frontend
+    schedule:
+      interval: weekly
+    labels: [dependencies, docker]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    labels: [dependencies, ci]

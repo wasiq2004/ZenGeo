@@ -1,0 +1,52 @@
+# Runtime dependencies - pinned exactly.
+#
+# Versions are current as of 2026-07-30 and clear `pip-audit --strict`, which
+# CI runs on every push and weekly on a schedule. Bump deliberately (Dependabot
+# opens the PRs) and let CI re-run the audit rather than pinning by habit.
+
+# --- Web framework ---
+fastapi==0.141.1
+starlette==1.3.1
+uvicorn[standard]==0.52.0
+gunicorn==26.0.0
+python-multipart==0.0.32
+
+# --- Data / ORM ---
+sqlalchemy[asyncio]==2.0.51
+asyncpg==0.31.0
+psycopg[binary]==3.3.4
+alembic==1.18.5
+
+# --- Validation / settings ---
+pydantic==2.13.4
+pydantic-settings==2.14.2
+email-validator==2.3.0
+
+# --- Security ---
+argon2-cffi==25.1.0
+pyjwt==2.13.0
+cryptography==49.0.0
+pyotp==2.10.0
+
+# --- HTTP / parsing ---
+httpx==0.28.1
+beautifulsoup4==4.15.0
+lxml==6.1.1
+
+# --- Background jobs ---
+celery==5.6.3
+redis==8.0.1
+
+# --- Reporting ---
+jinja2==3.1.6
+weasyprint==69.0
+
+# --- Email ---
+aiosmtplib==5.1.2
+
+# --- LLM provider SDKs (BYOK adapters) ---
+openai==2.50.0
+anthropic==0.120.2
+
+# --- Observability ---
+structlog==26.1.0

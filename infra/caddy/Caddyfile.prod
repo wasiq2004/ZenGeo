@@ -1,0 +1,58 @@
+# Production proxy for a single VPS.
+#
+# Caddy obtains and renews a Let's Encrypt certificate for {$PUBLIC_DOMAIN}
+# automatically - no certbot, no cron renewal, no manual cert paths. Requirements:
+#   * DNS A/AAAA record for the domain points at this VPS
+#   * ports 80 and 443 reachable from the internet (see README firewall notes)
+
+{
+	email {$ACME_EMAIL}
+	admin off
+	servers {
+		# Caddy is the only thing facing the internet, so it is the trusted
+		# source of client IPs for the backend's rate limiter.
+		trusted_proxies static private_ranges
+	}
+}
+
+{$PUBLIC_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "geolocation=(), microphone=(), camera=(), payment=()"
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+		-Server
+	}
+
+	# The API. FastAPI's own docs are disabled when ENVIRONMENT=production.
+	@api path /api/*
+	handle @api {
+		reverse_proxy backend:8000 {
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+		}
+	}
+
+	# Health probes for external uptime monitoring.
+	#   /health  - the process is up
+	#   /healthz - the database host is reachable from here. Point the uptime
+	#              monitor at this one: the database is on a separate box, so
+	#              the link between them can fail while the app is fine.
+	handle /health /healthz {
+		reverse_proxy backend:8000
+	}
+
+	# Static SPA build.
+	handle {
+		reverse_proxy frontend:80
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}

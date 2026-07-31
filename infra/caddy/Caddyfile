@@ -1,0 +1,28 @@
+# Default proxy config - plain HTTP on :8080, no TLS.
+#
+# Used only when running `docker compose -f docker-compose.yml up` on its own
+# (built frontend, no dev server, no certificates). Local development uses
+# Caddyfile.dev and the VPS uses Caddyfile.prod.
+
+{
+	admin off
+	auto_https off
+}
+
+:8080 {
+	encode zstd gzip
+
+	@api path /api/* /health /health/* /healthz
+	handle @api {
+		reverse_proxy backend:8000
+	}
+
+	handle {
+		reverse_proxy frontend:80
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

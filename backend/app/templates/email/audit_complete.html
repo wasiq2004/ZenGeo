@@ -1,0 +1,29 @@
+{% extends "_base.html" %}
+{% block subject %}Your GEO audit is ready{% endblock %}
+{% block content %}
+<h1 style="margin:0 0 12px 0;font-size:21px;font-weight:650;color:#ffffff;letter-spacing:-0.015em;">
+  Your GEO audit is ready
+</h1>
+<p style="margin:0 0 20px 0;color:#c3c9d8;">
+  Hi {{ name }} — the audit for <strong style="color:#ffffff;">{{ business }}</strong> has finished.
+</p>
+<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 24px 0;background:#0f1320;border:1px solid #232a3d;border-radius:12px;">
+  <tr>
+    <td style="padding:20px 24px;">
+      <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:#6b7488;">GEO Score</div>
+      <div style="font-size:38px;font-weight:700;color:#a5b4fc;line-height:1.1;margin-top:4px;">{{ score }}<span style="font-size:18px;color:#6b7488;">/100</span></div>
+      <div style="font-size:14px;color:#c3c9d8;margin-top:2px;">{{ band }}</div>
+    </td>
+  </tr>
+</table>
+<p style="margin:0 0 24px 0;">
+  <a
+    href="{{ link }}"
+    style="display:inline-block;background:#6366f1;color:#ffffff;text-decoration:none;padding:12px 22px;border-radius:9px;font-weight:600;font-size:15px;"
+    >View the full report</a
+  >
+</p>
+<p style="margin:0;color:#6b7488;font-size:13px;border-top:1px solid #232a3d;padding-top:16px;">
+  You can turn these notifications off in Settings → Notifications.
+</p>
+{% endblock %}

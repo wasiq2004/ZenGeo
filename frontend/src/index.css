@@ -1,0 +1,230 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 224 30% 12%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 224 30% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 224 30% 12%;
+
+    --primary: 246 74% 60%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 224 20% 96%;
+    --secondary-foreground: 224 30% 20%;
+
+    --muted: 224 20% 96%;
+    --muted-foreground: 224 12% 45%;
+    --accent: 268 70% 96%;
+    --accent-foreground: 268 60% 35%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 152 62% 38%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 30 60% 12%;
+
+    --border: 224 16% 89%;
+    --input: 224 16% 89%;
+    --ring: 246 74% 60%;
+
+    --radius: 0.7rem;
+
+    /* --- Typography ---------------------------------------------------
+       Two families that must never bleed into each other: the marketing
+       surface wears Poppins, the authenticated product wears Open Sans.
+       Nothing consumes these directly - use the `font-landing` / `font-app`
+       Tailwind utilities, which are the only things that read them. Both are
+       self-hosted (see src/styles/fonts.ts). */
+    --font-landing: 'Poppins', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --font-app: 'Open Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+    /* --- Data visualisation tokens -----------------------------------
+       Score bands are STATUS colours (ordered severity), not categorical
+       series, so they are always rendered beside a visible band label -
+       colour never carries the meaning alone. Each step is selected for
+       its own surface rather than flipped, and every one clears 3:1:
+       light 4.83 / 5.18 / 4.92 / 5.02, dark 6.57 / 8.03 / 10.89 / 10.43. */
+    --band-poor: #dc2626;
+    --band-fair: #c2410c;
+    --band-good: #a16207;
+    --band-excellent: #15803d;
+
+    /* Single-series charts use categorical slot 1 only. There is never a
+       second series, so no palette cycling and no legend box. */
+    --viz-series-1: #2a78d6;
+    --viz-series-1-soft: #cde2fb;
+    --viz-grid: #e1e0d9;
+    --viz-axis: #c3c2b7;
+    --viz-muted: #898781;
+    --viz-surface: #ffffff;
+  }
+
+  .dark {
+    --background: 226 34% 7%;
+    --foreground: 220 25% 96%;
+
+    --card: 226 30% 10%;
+    --card-foreground: 220 25% 96%;
+    --popover: 226 30% 10%;
+    --popover-foreground: 220 25% 96%;
+
+    --primary: 246 84% 68%;
+    --primary-foreground: 226 40% 8%;
+    --secondary: 226 24% 16%;
+    --secondary-foreground: 220 25% 92%;
+
+    --muted: 226 24% 15%;
+    --muted-foreground: 220 12% 62%;
+    --accent: 268 40% 20%;
+    --accent-foreground: 268 80% 88%;
+
+    --destructive: 0 72% 58%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 152 55% 45%;
+    --success-foreground: 152 80% 8%;
+    --warning: 38 92% 58%;
+    --warning-foreground: 30 60% 10%;
+
+    --border: 226 20% 20%;
+    --input: 226 20% 22%;
+    --ring: 246 84% 68%;
+
+    /* Dark steps are chosen for the dark surface, not derived from the
+       light ones - an automatic flip would drop below the contrast floor. */
+    --band-poor: #f87171;
+    --band-fair: #fb923c;
+    --band-good: #fbbf24;
+    --band-excellent: #4ade80;
+
+    --viz-series-1: #3987e5;
+    --viz-series-1-soft: #184f95;
+    --viz-grid: #2c2c2a;
+    --viz-axis: #383835;
+    --viz-muted: #898781;
+    --viz-surface: #121521;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Visible keyboard focus everywhere - never remove the outline outright. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+
+  ::selection {
+    @apply bg-primary/25;
+  }
+
+  /* Slim scrollbars that respect the theme. */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-border;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted-foreground/40;
+  }
+}
+
+@layer components {
+  /* Soft radial glow used behind hero and score sections. */
+  .glow-surface {
+    background-image:
+      radial-gradient(60rem 30rem at 50% -10%, hsl(var(--primary) / 0.16), transparent 60%),
+      radial-gradient(40rem 24rem at 90% 10%, hsl(268 70% 60% / 0.12), transparent 60%);
+  }
+
+  /* Hero mesh. Large blurred colour fields that drift behind the headline;
+     `contain: paint` keeps their blur from inflating the parent's paint area. */
+  .mesh-blob {
+    @apply pointer-events-none absolute rounded-full blur-3xl;
+    will-change: transform, opacity;
+  }
+
+  /* CTA lift. The glow is a shadow rather than a filter so it composites
+     cheaply, and both properties are transitioned rather than animated so
+     nothing moves until the pointer is actually over the button. */
+  .cta-glow {
+    @apply transition-[transform,box-shadow] duration-200 ease-out;
+  }
+  .cta-glow:hover {
+    @apply -translate-y-0.5;
+    box-shadow:
+      0 8px 24px -6px hsl(var(--primary) / 0.55),
+      0 0 0 1px hsl(var(--primary) / 0.25);
+  }
+  .cta-glow:active {
+    @apply translate-y-0;
+  }
+
+  /* Feature-card hover lift. */
+  .card-lift {
+    @apply transition-[transform,box-shadow,border-color] duration-200 ease-out;
+  }
+  .card-lift:hover {
+    @apply -translate-y-1 border-primary/40 shadow-lg;
+  }
+
+  .card-surface {
+    @apply rounded-lg border border-border bg-card text-card-foreground shadow-sm;
+  }
+
+  .skeleton {
+    @apply relative overflow-hidden rounded-md bg-muted;
+  }
+  .skeleton::after {
+    @apply absolute inset-0 -translate-x-full;
+    content: '';
+    background-image: linear-gradient(
+      90deg,
+      transparent,
+      hsl(var(--foreground) / 0.06),
+      transparent
+    );
+    animation: shimmer 1.6s infinite;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@media print {
+  body {
+    background: #fff;
+    color: #000;
+  }
+  .no-print {
+    display: none !important;
+  }
+}

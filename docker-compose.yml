@@ -1,0 +1,114 @@
+# Base stack. `docker compose up` also applies docker-compose.override.yml
+# (local development). For the VPS use:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Note: the reverse proxy is Caddy rather than Nginx - on a single VPS it gets
+# automatic Let's Encrypt TLS with a three-line config (spec section 11).
+#
+# Postgres is deliberately NOT a service here: the database is an external
+# managed instance reached over TLS via DATABASE_URL. Redis stays local because
+# it holds only rate-limit counters and the Celery queue - nothing whose loss
+# outlives a restart. Local development gets a throwaway Postgres container from
+# docker-compose.override.yml; production has no postgres service at all.
+
+name: geo-audit
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "no", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    networks: [internal]
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: [.env]
+    environment:
+      # POSTGRES_HOST intentionally not set here - it comes from .env and points
+      # at the managed instance. Only the dev override redirects it to a container.
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+    volumes:
+      - reports_data:/data/reports
+    depends_on:
+      redis: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks: [internal]
+
+  worker:
+    # Same image as the backend - only the command differs.
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: [.env]
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+    command:
+      - celery
+      - -A
+      - app.worker.celery_app.celery_app
+      - worker
+      - --loglevel=info
+      - --concurrency=4
+      - --max-tasks-per-child=50
+    volumes:
+      - reports_data:/data/reports
+    depends_on:
+      redis: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.worker.celery_app.celery_app inspect ping -d celery@$$HOSTNAME || exit 1"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 40s
+    networks: [internal]
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: /api/v1
+    restart: unless-stopped
+    networks: [internal]
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on: [backend, frontend]
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [internal, edge]
+
+volumes:
+  redis_data:
+  reports_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  # Nothing on `internal` is published to the host.
+  internal:
+  # Only the proxy joins `edge`, which is the network with published ports.
+  edge:

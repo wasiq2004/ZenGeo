@@ -1,0 +1,18 @@
+{
+  "$comment": [
+    "Advisories consciously accepted, each with the reason it cannot affect this",
+    "app and a date by which someone must look again. Anything not listed here",
+    "fails the build. Adding an entry is a decision, not a workaround - if the",
+    "reason does not still hold at reviewBy, upgrade instead of extending it."
+  ],
+  "allow": [
+    {
+      "id": "GHSA-qwww-vcr4-c8h2",
+      "package": "react-router",
+      "severity": "high",
+      "reason": "Affects React Router's RSC mode, where a server action can run before a 400 response. This app uses React Router only as a client-side URL matcher: <BrowserRouter> with <Routes>/<Route>, no createBrowserRouter, no RouterProvider, no route loaders or actions, no useFetcher, no React Router <Form>, and no server rendering. The vulnerable code path is not shipped. npm's suggested remediation is a downgrade to 7.11.0, which would reintroduce the open-redirect and XSS advisories affecting react-router 6.0.0-7.17.0 - and those ARE reachable from <Link> and useNavigate. Staying on 7.18.2 is strictly the safer position.",
+      "acceptedOn": "2026-07-30",
+      "reviewBy": "2026-10-30"
+    }
+  ]
+}

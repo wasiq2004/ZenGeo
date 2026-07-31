@@ -1,0 +1,31 @@
+{% extends "_base.html" %}
+{% block subject %}Your email address was changed{% endblock %}
+{% block content %}
+<h1 style="margin:0 0 12px 0;font-size:21px;font-weight:650;color:#ffffff;letter-spacing:-0.015em;">
+  Your email address was changed
+</h1>
+<p style="margin:0 0 20px 0;color:#c3c9d8;">
+  Hi {{ name }} — the address on your CheckGEO.ai account was just changed to
+  <strong style="color:#ffffff;">{{ new_email }}</strong>.
+</p>
+<p style="margin:0 0 20px 0;color:#c3c9d8;">
+  If that was you, nothing further is needed here — just confirm the new address using
+  the link we sent to it.
+</p>
+<p style="margin:0 0 12px 0;color:#fca5a5;font-weight:600;">If it was not you</p>
+<p style="margin:0 0 24px 0;color:#c3c9d8;">
+  Someone else may have access to your account. Reset your password straight away — that
+  signs out every existing session.
+</p>
+<p style="margin:0 0 24px 0;">
+  <a
+    href="{{ frontend_url }}/forgot-password"
+    style="display:inline-block;background:#6366f1;color:#ffffff;text-decoration:none;padding:12px 22px;border-radius:9px;font-weight:600;font-size:15px;"
+    >Reset my password</a
+  >
+</p>
+<p style="margin:0;color:#6b7488;font-size:13px;border-top:1px solid #232a3d;padding-top:16px;">
+  This notice was sent to your previous address on purpose, so a change you did not make
+  cannot go unnoticed.
+</p>
+{% endblock %}

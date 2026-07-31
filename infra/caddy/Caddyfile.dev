@@ -1,0 +1,31 @@
+# Development proxy.
+#
+# Everything is served from a single origin (http://localhost:8080) so the
+# httpOnly refresh cookie and SameSite=Strict behave exactly as they do in
+# production. Hitting the Vite server on :5173 directly also works, but then
+# the cookie is cross-origin and refresh will not fire.
+
+{
+	admin off
+	auto_https off
+}
+
+:8080 {
+	encode zstd gzip
+
+	# API + probes -> FastAPI
+	@api path /api/* /health /health/* /healthz /docs /docs/* /openapi.json
+	handle @api {
+		reverse_proxy backend:8000
+	}
+
+	# Everything else -> Vite dev server (websocket upgrade for HMR is automatic)
+	handle {
+		reverse_proxy frontend:5173
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

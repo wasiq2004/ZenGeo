@@ -1,0 +1,471 @@
+{# GEO audit PDF report. Rendered by WeasyPrint - print CSS only, no JS. #}
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>CheckGEO.ai — {{ business.name }}</title>
+    <style>
+      @page {
+        size: A4;
+        margin: 18mm 16mm 20mm 16mm;
+        @bottom-left {
+          content: "CheckGEO.ai — {{ business.name }}";
+          font-size: 8pt;
+          color: #6b7280;
+        }
+        @bottom-right {
+          content: "Page " counter(page) " of " counter(pages);
+          font-size: 8pt;
+          color: #6b7280;
+        }
+      }
+      @page :first {
+        margin: 0;
+        @bottom-left { content: ""; }
+        @bottom-right { content: ""; }
+      }
+
+      * { box-sizing: border-box; }
+      body {
+        font-family: "DejaVu Sans", sans-serif;
+        font-size: 9.5pt;
+        line-height: 1.55;
+        color: #111827;
+        margin: 0;
+      }
+      h1, h2, h3 { color: #0f172a; line-height: 1.25; }
+      h2 {
+        font-size: 15pt;
+        margin: 0 0 4mm 0;
+        padding-bottom: 2mm;
+        border-bottom: 1.5pt solid #e5e7eb;
+      }
+      h3 { font-size: 11pt; margin: 0 0 2mm 0; }
+      p { margin: 0 0 2.5mm 0; }
+      .muted { color: #6b7280; }
+      .small { font-size: 8.5pt; }
+
+      /* ---------- Cover ---------- */
+      .cover {
+        height: 297mm;
+        padding: 30mm 22mm;
+        background: linear-gradient(160deg, #111827 0%, #1e1b4b 55%, #312e81 100%);
+        color: #fff;
+        page-break-after: always;
+      }
+      .cover .eyebrow {
+        font-size: 9pt;
+        letter-spacing: 2.5pt;
+        text-transform: uppercase;
+        color: #a5b4fc;
+        margin-bottom: 6mm;
+      }
+      .cover h1 { font-size: 30pt; color: #fff; margin: 0 0 3mm 0; }
+      .cover .url { font-size: 11pt; color: #c7d2fe; margin-bottom: 18mm; }
+      .score-block {
+        border: 1.5pt solid rgba(255, 255, 255, 0.22);
+        border-radius: 5mm;
+        padding: 10mm;
+        background: rgba(255, 255, 255, 0.06);
+        margin-bottom: 12mm;
+      }
+      .score-number { font-size: 58pt; font-weight: bold; line-height: 1; }
+      .score-of { font-size: 16pt; color: #c7d2fe; }
+      .score-band {
+        display: inline-block;
+        margin-top: 3mm;
+        padding: 1.5mm 5mm;
+        border-radius: 20mm;
+        font-size: 11pt;
+        font-weight: bold;
+        color: #0f172a;
+        background: {{ band_colour }};
+      }
+      .cover-meta { font-size: 9.5pt; color: #c7d2fe; }
+      .cover-meta strong { color: #fff; }
+
+      /* ---------- Layout ---------- */
+      section { page-break-inside: avoid; margin-bottom: 9mm; }
+      .page-break { page-break-before: always; }
+
+      table { width: 100%; border-collapse: collapse; margin-bottom: 4mm; }
+      th, td {
+        text-align: left;
+        padding: 2mm 2.5mm;
+        border-bottom: 0.5pt solid #e5e7eb;
+        vertical-align: top;
+      }
+      th {
+        font-size: 8pt;
+        text-transform: uppercase;
+        letter-spacing: 0.6pt;
+        color: #6b7280;
+        border-bottom: 1pt solid #d1d5db;
+      }
+      tr { page-break-inside: avoid; }
+
+      .bar-track {
+        display: inline-block;
+        width: 28mm;
+        height: 2.6mm;
+        background: #e5e7eb;
+        border-radius: 2mm;
+        overflow: hidden;
+        vertical-align: middle;
+      }
+      .bar-fill { display: block; height: 100%; border-radius: 2mm; }
+
+      .pillar {
+        border: 0.5pt solid #e5e7eb;
+        border-radius: 3mm;
+        padding: 5mm;
+        margin-bottom: 5mm;
+        page-break-inside: avoid;
+      }
+      .pillar-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        margin-bottom: 1mm;
+      }
+      .pillar-score { font-size: 17pt; font-weight: bold; }
+      .check { margin: 1.5mm 0; padding-left: 6mm; position: relative; }
+      .check::before {
+        position: absolute;
+        left: 0;
+        top: 0;
+        font-weight: bold;
+      }
+      .check.pass::before { content: "PASS"; color: #16a34a; font-size: 6.5pt; }
+      .check.fail::before { content: "FAIL"; color: #dc2626; font-size: 6.5pt; }
+      .check.info::before { content: "NOTE"; color: #6b7280; font-size: 6.5pt; }
+
+      .rec {
+        border-left: 2.5pt solid #6366f1;
+        padding: 0 0 0 4mm;
+        margin-bottom: 4.5mm;
+        page-break-inside: avoid;
+      }
+      .rec h4 { margin: 0 0 1mm 0; font-size: 10pt; }
+      .rec-meta { font-size: 7.5pt; text-transform: uppercase; letter-spacing: 0.5pt; color: #6b7280; }
+      .rec-body { white-space: pre-wrap; font-size: 9pt; }
+      .not-actionable { border-left-color: #9ca3af; }
+
+      .tag {
+        display: inline-block;
+        padding: 0.4mm 2mm;
+        border-radius: 1.5mm;
+        font-size: 7.5pt;
+        font-weight: bold;
+      }
+      .tag-high { background: #fee2e2; color: #991b1b; }
+      .tag-medium { background: #fef3c7; color: #92400e; }
+      .tag-low { background: #f3f4f6; color: #4b5563; }
+      .tag-yes { background: #dcfce7; color: #166534; }
+      .tag-no { background: #f3f4f6; color: #6b7280; }
+
+      .callout {
+        background: #eef2ff;
+        border: 0.5pt solid #c7d2fe;
+        border-radius: 2.5mm;
+        padding: 4mm;
+        margin-bottom: 5mm;
+      }
+      .appendix pre {
+        background: #f9fafb;
+        border: 0.5pt solid #e5e7eb;
+        border-radius: 2mm;
+        padding: 3mm;
+        font-size: 7.5pt;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        font-family: "DejaVu Sans Mono", monospace;
+      }
+    </style>
+  </head>
+  <body>
+    {# ------------------------------ Cover ------------------------------ #}
+    <div class="cover">
+      <div class="eyebrow">Generative Engine Optimisation Audit</div>
+      <h1>{{ business.name }}</h1>
+      <div class="url">{{ business.website_url }}</div>
+
+      <div class="score-block">
+        <div class="small" style="color: #a5b4fc; letter-spacing: 1.5pt; text-transform: uppercase;">
+          Overall GEO score
+        </div>
+        <div>
+          <span class="score-number">{{ '%.0f'|format(score) }}</span>
+          <span class="score-of">/ 100</span>
+        </div>
+        <div class="score-band">{{ band }}</div>
+      </div>
+
+      <div class="cover-meta">
+        <div>Generated <strong>{{ generated_at.strftime('%d %B %Y') }}</strong></div>
+        {% if business.industry %}<div>Industry <strong>{{ business.industry }}</strong></div>{% endif %}
+        {% if business.location %}<div>Location <strong>{{ business.location }}</strong></div>{% endif %}
+        <div>Prioritised actions <strong>{{ recommendation_count }}</strong></div>
+      </div>
+    </div>
+
+    {# --------------------------- Score summary --------------------------- #}
+    <section>
+      <h2>How your score breaks down</h2>
+      <p class="muted">
+        Each pillar is scored 0–100 on its own, then combined by weight into the composite
+        score above. Pillars that could not be tested are excluded and their weight is shared
+        proportionally across the rest, so the score always sits on the same 0–100 scale.
+      </p>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Pillar</th>
+            <th style="width: 18mm;">Weight</th>
+            <th style="width: 40mm;">Score</th>
+            <th style="width: 14mm;"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for pillar in pillars %}
+            <tr>
+              <td>
+                <strong>{{ pillar.name }}</strong>
+                {% if pillar.skipped %}<br /><span class="small muted">Not tested</span>{% endif %}
+              </td>
+              <td>
+                {% if pillar.skipped %}
+                  <span class="muted">—</span>
+                {% else %}
+                  {{ '%.0f'|format(pillar.effective_weight * 100) }}%
+                {% endif %}
+              </td>
+              <td>
+                {% if not pillar.skipped %}
+                  <span class="bar-track">
+                    <span
+                      class="bar-fill"
+                      style="width: {{ pillar.score }}%; background: {{ band_colour_for(pillar.score) }};"
+                    ></span>
+                  </span>
+                {% endif %}
+              </td>
+              <td style="text-align: right;">
+                {% if pillar.skipped %}
+                  <span class="muted">—</span>
+                {% else %}
+                  <strong>{{ '%.0f'|format(pillar.score) }}</strong>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+
+    {# ------------------------- Pillar detail ------------------------- #}
+    <div class="page-break"></div>
+    <h2>Pillar by pillar</h2>
+
+    {% for pillar in pillars %}
+      <div class="pillar">
+        <div class="pillar-head">
+          <h3>{{ pillar.name }}</h3>
+          <span class="pillar-score" style="color: {{ band_colour_for(pillar.score) }};">
+            {% if pillar.skipped %}—{% else %}{{ '%.0f'|format(pillar.score) }}{% endif %}
+          </span>
+        </div>
+        <p class="muted small">
+          Weight {{ '%.0f'|format(pillar.weight * 100) }}%
+          {% if not pillar.skipped and pillar.effective_weight != pillar.weight %}
+            (counted as {{ '%.0f'|format(pillar.effective_weight * 100) }}% after redistribution)
+          {% endif %}
+        </p>
+        <p>{{ pillar.summary }}</p>
+
+        {% if pillar.checks %}
+          {% for check in pillar.checks %}
+            <div class="check {% if check.passed is none %}info{% elif check.passed %}pass{% else %}fail{% endif %}">
+              <strong>{{ check.label }}</strong>
+              {% if check.max_points > 0 %}
+                <span class="muted small">({{ check.points }}/{{ check.max_points }})</span>
+              {% endif %}
+              <br />
+              <span class="small">{{ check.detail }}</span>
+            </div>
+          {% endfor %}
+        {% endif %}
+      </div>
+    {% endfor %}
+
+    {# ------------------------ Share of Voice ------------------------ #}
+    <div class="page-break"></div>
+    <h2>AI Share of Voice</h2>
+
+    {% if not sov.tested %}
+      <div class="callout">
+        <strong>Not tested.</strong>
+        <p style="margin: 2mm 0 0 0;">{{ sov.skip_reason }}</p>
+      </div>
+    {% else %}
+      <p class="muted">
+        Your own target prompts were sent to the assistants you connected, using your own API
+        keys. {{ sov.total_calls }} call(s) across {{ sov.providers_tested|length }} provider(s){% if sov.failed_calls %}, of which {{ sov.failed_calls }} failed and are excluded from the rates below{% endif %}.
+      </p>
+
+      <table>
+        <tbody>
+          <tr>
+            <td><strong>Mention rate</strong><br /><span class="small muted">Answers that named you at all</span></td>
+            <td style="text-align: right; font-size: 14pt;"><strong>{{ '%.0f'|format(sov.mention_rate * 100) }}%</strong></td>
+            <td><strong>Citation rate</strong><br /><span class="small muted">Answers that linked to your domain</span></td>
+            <td style="text-align: right; font-size: 14pt;"><strong>{{ '%.0f'|format(sov.citation_rate * 100) }}%</strong></td>
+          </tr>
+        </tbody>
+      </table>
+
+      {% if sov.competitor_share %}
+        <h3>Competitors appearing in the same answers</h3>
+        <table>
+          <thead>
+            <tr><th>Competitor</th><th style="text-align: right; width: 30mm;">Answers</th></tr>
+          </thead>
+          <tbody>
+            {% for name, count in sov.competitor_share.items() %}
+              <tr><td>{{ name }}</td><td style="text-align: right;">{{ count }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endif %}
+
+      <h3>Every prompt tested</h3>
+      <table>
+        <thead>
+          <tr>
+            <th style="width: 50mm;">Prompt</th>
+            <th style="width: 22mm;">Provider</th>
+            <th style="width: 16mm;">Mentioned</th>
+            <th style="width: 14mm;">Cited</th>
+            <th>What the assistant said</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in sov_results %}
+            <tr>
+              <td class="small">{{ row.prompt }}</td>
+              <td class="small">
+                {{ row.provider }}<br /><span class="muted">{{ row.model }}</span>
+              </td>
+              <td>
+                {% if row.error %}
+                  <span class="tag tag-low">Error</span>
+                {% elif row.mentioned %}
+                  <span class="tag tag-yes">Yes</span>
+                  {% if row.position %}<br /><span class="small muted">#{{ row.position }}</span>{% endif %}
+                {% else %}
+                  <span class="tag tag-no">No</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if row.cited %}
+                  <span class="tag tag-yes">Yes</span>
+                {% else %}
+                  <span class="tag tag-no">No</span>
+                {% endif %}
+              </td>
+              <td class="small">
+                {% if row.error %}
+                  <span class="muted">{{ row.error }}</span>
+                {% else %}
+                  {{ row.excerpt }}
+                  {% if row.sentiment %}
+                    <br /><span class="muted">Tone: {{ row.sentiment }}</span>
+                  {% endif %}
+                  {% if row.competitors_mentioned %}
+                    <br /><span class="muted">Also named: {{ row.competitors_mentioned|join(', ') }}</span>
+                  {% endif %}
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p class="small muted">
+        Tone is a keyword heuristic over the sentences that name you, not a model judgement.
+        Citation rates are only directly comparable between web-grounded providers.
+      </p>
+    {% endif %}
+
+    {# ----------------------- Recommendations ----------------------- #}
+    <div class="page-break"></div>
+    <h2>What to do about it</h2>
+    <p class="muted">
+      Ordered by impact, then by how cheap the fix is. Start at the top.
+    </p>
+
+    {% for group_label, recs in grouped_recommendations %}
+      {% if recs %}
+        <section>
+          <h3>{{ group_label }} ({{ recs|length }})</h3>
+          {% for rec in recs %}
+            <div class="rec {% if not rec.actionable %}not-actionable{% endif %}">
+              <h4>{{ rec.title }}</h4>
+              <div class="rec-meta">
+                <span class="tag tag-{{ rec.impact }}">{{ rec.impact }} impact</span>
+                &nbsp;{{ rec.pillar.replace('_', ' ') }}
+                {% if not rec.actionable %}
+                  &nbsp;· needs someone with site-root access
+                {% endif %}
+              </div>
+              <div class="rec-body">{{ rec.detail }}</div>
+            </div>
+          {% endfor %}
+        </section>
+      {% endif %}
+    {% endfor %}
+
+    {% if recommendation_count == 0 %}
+      <p>No issues found. Re-run this audit after your next significant content change.</p>
+    {% endif %}
+
+    {# --------------------------- Appendix --------------------------- #}
+    <div class="page-break"></div>
+    <section class="appendix">
+      <h2>Appendix: raw findings</h2>
+      <p class="muted small">
+        Exactly what the crawler observed, so every score above can be traced back to evidence.
+      </p>
+
+      {% for pillar in pillars %}
+        {% set data = raw_findings.get(pillar.key) %}
+        {% if data %}
+          <h3>{{ pillar.name }}</h3>
+          <table>
+            <tbody>
+              {% for key, value in data.items() %}
+                {% if key != 'results' %}
+                  <tr>
+                    <td style="width: 55mm;" class="small"><strong>{{ key.replace('_', ' ') }}</strong></td>
+                    <td class="small">
+                      {% if value is mapping %}
+                        {{ value|tojson }}
+                      {% elif value is iterable and value is not string %}
+                        {{ value|join(', ') if value else '—' }}
+                      {% else %}
+                        {{ value if value is not none else '—' }}
+                      {% endif %}
+                    </td>
+                  </tr>
+                {% endif %}
+              {% endfor %}
+            </tbody>
+          </table>
+        {% endif %}
+      {% endfor %}
+
+      <h3>Questionnaire answers</h3>
+      <pre>{{ questionnaire|tojson(indent=2) }}</pre>
+    </section>
+  </body>
+</html>
