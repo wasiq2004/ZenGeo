@@ -1,5 +1,5 @@
-import { useQuery } from '@tanstack/react-query'
-import { ArrowLeft, KeyRound, ShieldAlert } from 'lucide-react'
+import { useMutation, useQuery } from '@tanstack/react-query'
+import { ArrowLeft, Download, KeyRound, ShieldAlert } from 'lucide-react'
 import { Link, useParams } from 'react-router-dom'
 import { ResetPasswordCard } from '@/components/admin/ResetPasswordCard'
 import { PageHeader } from '@/components/layout/AppShell'
@@ -8,7 +8,8 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Alert, EmptyState, LoadingScreen } from '@/components/ui/feedback'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { api } from '@/lib/api'
+import { api, apiDownload } from '@/lib/api'
+import { useToast } from '@/components/ui/toast'
 import { formatDateTime, formatRelative, formatScore } from '@/lib/format'
 import { PROVIDER_LABEL, bandBadgeVariant } from '@/lib/geo'
 import type { AdminUserRow } from '@/lib/types'
@@ -30,7 +31,15 @@ interface UserDetailResponse {
     score_band: string | null
     created_at: string
     completed_at: string | null
+    has_report: boolean
   }>
+  audit_summary: {
+    total: number
+    completed: number
+    failed: number
+    reports: number
+    showing: number
+  }
   api_keys: Array<{
     provider: string
     label: string
@@ -54,6 +63,24 @@ export default function AdminUserDetail() {
     queryFn: () => api.get<UserDetailResponse>(`/admin/users/${userId}`),
   })
 
+  const { toast } = useToast()
+
+  // GET /reports/{id} has always permitted an administrator to fetch anyone's
+  // report, and logs `admin_report_access` when it is not the owner asking.
+  // This only surfaces that - it does not widen what an admin may reach.
+  const download = useMutation({
+    mutationFn: async (audit: { id: string; business_name: string }) => {
+      const blob = await apiDownload(`/reports/${audit.id}`)
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `checkgeo-${audit.business_name.replace(/\W+/g, '-').toLowerCase() || 'report'}.pdf`
+      link.click()
+      URL.revokeObjectURL(url)
+    },
+    onError: () => toast({ title: 'Could not download that report', variant: 'error' }),
+  })
+
   if (detailQuery.isLoading) return <LoadingScreen label="Loading user" />
   if (detailQuery.isError || !detailQuery.data) {
     return (
@@ -66,7 +93,7 @@ export default function AdminUserDetail() {
     )
   }
 
-  const { user, businesses, audits, api_keys, admin_activity } = detailQuery.data
+  const { user, businesses, audits, api_keys, admin_activity, audit_summary } = detailQuery.data
 
   return (
     <>
@@ -92,7 +119,7 @@ export default function AdminUserDetail() {
       />
 
       <div className="space-y-6">
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
           <Card>
             <CardContent className="p-5">
               <p className="text-sm text-muted-foreground">Joined</p>
@@ -110,7 +137,23 @@ export default function AdminUserDetail() {
           <Card>
             <CardContent className="p-5">
               <p className="text-sm text-muted-foreground">Audits run</p>
-              <p className="text-lg font-medium tabular-nums">{user.audit_count}</p>
+              <p className="text-lg font-medium tabular-nums">{audit_summary.total}</p>
+              <p className="mt-0.5 text-xs text-muted-foreground tabular-nums">
+                {audit_summary.completed} completed · {audit_summary.failed} failed
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-5">
+              <p className="text-sm text-muted-foreground">PDF reports</p>
+              <p className="text-lg font-medium tabular-nums">{audit_summary.reports}</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">Downloadable below</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-5">
+              <p className="text-sm text-muted-foreground">Businesses</p>
+              <p className="text-lg font-medium tabular-nums">{businesses.length}</p>
             </CardContent>
           </Card>
         </div>
@@ -188,7 +231,15 @@ export default function AdminUserDetail() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Audits ({audits.length})</CardTitle>
+            <CardTitle>Audits ({audit_summary.total})</CardTitle>
+            <CardDescription>
+              {audit_summary.showing < audit_summary.total
+                ? `Showing the ${audit_summary.showing} most recent of ${audit_summary.total}.`
+                : 'Every audit this user has run.'}{' '}
+              {audit_summary.reports > 0
+                ? `${audit_summary.reports} have a PDF report you can download.`
+                : 'None have produced a PDF report yet.'}
+            </CardDescription>
           </CardHeader>
           <CardContent>
             {audits.length === 0 ? (
@@ -201,6 +252,7 @@ export default function AdminUserDetail() {
                     <TableHead>Status</TableHead>
                     <TableHead className="text-right">Score</TableHead>
                     <TableHead>Run</TableHead>
+                    <TableHead className="text-right">Report</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -219,6 +271,25 @@ export default function AdminUserDetail() {
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">
                         {formatRelative(audit.created_at)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {audit.has_report ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            loading={download.isPending && download.variables?.id === audit.id}
+                            onClick={() =>
+                              download.mutate({
+                                id: audit.id,
+                                business_name: audit.business_name,
+                              })
+                            }
+                          >
+                            <Download aria-hidden="true" /> PDF
+                          </Button>
+                        ) : (
+                          <span className="text-sm text-muted-foreground">—</span>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))}

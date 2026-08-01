@@ -229,6 +229,20 @@ async def user_detail(user_id: uuid.UUID, _: AdminUser, db: DbSession) -> dict[s
         )
     )
     keys = list(await db.scalars(select(LLMApiKey).where(LLMApiKey.user_id == user_id)))
+
+    # Counted in SQL, not as len(audits): that list is capped at 50, so a user
+    # with 80 audits would otherwise be reported as having run exactly 50.
+    totals = (
+        await db.execute(
+            select(
+                func.count(Audit.id),
+                func.count(case((Audit.status == AuditStatus.completed, 1))),
+                func.count(case((Audit.status == AuditStatus.failed, 1))),
+                func.count(case((Audit.pdf_report_path.is_not(None), 1))),
+            ).where(Audit.user_id == user_id)
+        )
+    ).one()
+    audits_total, audits_completed, audits_failed, reports_total = (t or 0 for t in totals)
     activity = list(
         await db.scalars(
             select(AdminAuditLog)
@@ -241,11 +255,18 @@ async def user_detail(user_id: uuid.UUID, _: AdminUser, db: DbSession) -> dict[s
     return {
         "user": _user_row(
             user,
-            len(audits),
+            audits_total,
             len(businesses),
             audits[0].created_at if audits else None,
             sorted({key.provider.value for key in keys if key.is_active}),
         ).model_dump(mode="json"),
+        "audit_summary": {
+            "total": audits_total,
+            "completed": audits_completed,
+            "failed": audits_failed,
+            "reports": reports_total,
+            "showing": len(audits),
+        },
         "businesses": [
             {
                 "id": str(b.id),
@@ -265,6 +286,10 @@ async def user_detail(user_id: uuid.UUID, _: AdminUser, db: DbSession) -> dict[s
                 "score_band": a.score_band,
                 "created_at": a.created_at.isoformat(),
                 "completed_at": a.completed_at.isoformat() if a.completed_at else None,
+                # Drives the download button. Admins may already fetch any
+                # report via GET /reports/{id} - that route has allowed it all
+                # along and logs the access - this only makes it visible.
+                "has_report": bool(a.pdf_report_path),
             }
             for a in audits
         ],

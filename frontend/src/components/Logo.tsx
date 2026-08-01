@@ -5,8 +5,8 @@ export function LogoMark({ className }: { className?: string }) {
     <svg viewBox="0 0 32 32" className={cn('size-8', className)} aria-hidden="true">
       <defs>
         <linearGradient id="geo-logo-gradient" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="hsl(246 84% 66%)" />
-          <stop offset="1" stopColor="hsl(276 76% 62%)" />
+          <stop offset="0" stopColor="#2dc6de" />
+          <stop offset="1" stopColor="#f5c518" />
         </linearGradient>
       </defs>
       <rect width="32" height="32" rx="8" fill="url(#geo-logo-gradient)" />

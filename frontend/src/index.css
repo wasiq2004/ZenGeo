@@ -12,15 +12,18 @@
     --popover: 0 0% 100%;
     --popover-foreground: 224 30% 12%;
 
-    --primary: 246 74% 60%;
+    /* Brand cyan, shared with the marketing surface so the product and the
+       landing page read as one thing. #0a7186: 5.65:1 against white, and white
+       text on it is the same 5.65:1 - it works as a fill and as ink. */
+    --primary: 190 86% 28%;
     --primary-foreground: 0 0% 100%;
     --secondary: 224 20% 96%;
     --secondary-foreground: 224 30% 20%;
 
     --muted: 224 20% 96%;
     --muted-foreground: 224 12% 45%;
-    --accent: 268 70% 96%;
-    --accent-foreground: 268 60% 35%;
+    --accent: 189 67% 94%;
+    --accent-foreground: 191 70% 17%;
 
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
@@ -31,7 +34,7 @@
 
     --border: 224 16% 89%;
     --input: 224 16% 89%;
-    --ring: 246 74% 60%;
+    --ring: 190 86% 28%;
 
     --radius: 0.7rem;
 
@@ -47,9 +50,10 @@
     --font-app: 'Open Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
 
     /* --- Marketing accent ---------------------------------------------
-       Cyan -> gold, taken from zenautomations.in so the two sites read as one
-       brand. Scoped to the landing tree on purpose: the authenticated product
-       keeps its indigo primary and nothing here touches --primary.
+       Cyan -> gold, taken from zenautomations.in. These drive the gradient
+       treatments on the landing page; --primary above now carries the same
+       cyan into the authenticated product, so the whole application reads as
+       one brand rather than the marketing page being a separate skin.
 
        These are the LIGHT-mode steps and they are darker than the reference's,
        which is not a deviation but a requirement: that site is dark-only, and
@@ -76,8 +80,8 @@
 
     /* Single-series charts use categorical slot 1 only. There is never a
        second series, so no palette cycling and no legend box. */
-    --viz-series-1: #2a78d6;
-    --viz-series-1-soft: #cde2fb;
+    --viz-series-1: #0891b2;
+    --viz-series-1-soft: #cdeef5;
     --viz-grid: #e1e0d9;
     --viz-axis: #c3c2b7;
     --viz-muted: #898781;
@@ -93,8 +97,10 @@
     --popover: 226 30% 10%;
     --popover-foreground: 220 25% 96%;
 
-    --primary: 246 84% 68%;
-    --primary-foreground: 226 40% 8%;
+    /* #2dc6de - the marketing cyan itself, which suits a dark surface:
+       9.40:1 against the background, and dark ink on it is the same. */
+    --primary: 188 73% 52%;
+    --primary-foreground: 225 35% 7%;
     --secondary: 226 24% 16%;
     --secondary-foreground: 220 25% 92%;
 
@@ -107,8 +113,8 @@
 
     --muted: 226 24% 15%;
     --muted-foreground: 220 12% 62%;
-    --accent: 268 40% 20%;
-    --accent-foreground: 268 80% 88%;
+    --accent: 191 60% 18%;
+    --accent-foreground: 188 70% 85%;
 
     --destructive: 0 72% 58%;
     --destructive-foreground: 0 0% 100%;
@@ -119,7 +125,7 @@
 
     --border: 226 20% 20%;
     --input: 226 20% 22%;
-    --ring: 246 84% 68%;
+    --ring: 188 73% 52%;
 
     /* Dark steps are chosen for the dark surface, not derived from the
        light ones - an automatic flip would drop below the contrast floor. */
@@ -128,8 +134,8 @@
     --band-good: #fbbf24;
     --band-excellent: #4ade80;
 
-    --viz-series-1: #3987e5;
-    --viz-series-1-soft: #184f95;
+    --viz-series-1: #0d9dbc;
+    --viz-series-1-soft: #0b4a58;
     --viz-grid: #2c2c2a;
     --viz-axis: #383835;
     --viz-muted: #898781;
@@ -180,7 +186,7 @@
   .glow-surface {
     background-image:
       radial-gradient(60rem 30rem at 50% -10%, hsl(var(--primary) / 0.16), transparent 60%),
-      radial-gradient(40rem 24rem at 90% 10%, hsl(268 70% 60% / 0.12), transparent 60%);
+      radial-gradient(40rem 24rem at 90% 10%, hsl(48 91% 53% / 0.10), transparent 60%);
   }
 
   /* Hero mesh. Large blurred colour fields that drift behind the headline;
