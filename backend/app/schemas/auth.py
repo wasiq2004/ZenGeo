@@ -70,6 +70,17 @@ class TokenResponse(StrictModel):
     user: UserPublic
 
 
+class SessionState(StrictModel):
+    """Who you are, plus whether an admin is currently acting as you.
+
+    `impersonated_by` is read from the token's `act` claim rather than stored,
+    so it cannot drift from the credential actually presented.
+    """
+
+    user: UserPublic
+    impersonated_by: uuid.UUID | None = None
+
+
 class UserPublic(ORMModel):
     id: uuid.UUID
     email: str

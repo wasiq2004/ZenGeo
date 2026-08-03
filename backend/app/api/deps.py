@@ -63,10 +63,42 @@ async def get_current_user(
         )
 
     request.state.user_id = str(user.id)
+    # Carried on the request so downstream guards and the audit trail can see
+    # that this session is an admin acting as someone else.
+    request.state.impersonated_by = payload.get("act")
     return user
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
+
+
+async def forbid_impersonation(request: Request, _: CurrentUser) -> None:
+    """Block an impersonating session from touching the account itself.
+
+    An admin acting as a user is there to see what the user sees and to
+    reproduce a problem - not to change the credentials that would lock the
+    real owner out. Password, email and account deletion are refused outright
+    rather than merely hidden in the UI, because the UI is not the boundary.
+
+    The unused `CurrentUser` parameter is load-bearing: it forces
+    `get_current_user` to resolve FIRST, which is what populates
+    `request.state.impersonated_by`. Without it FastAPI is free to run this
+    guard before the token has been decoded, `getattr` returns None, and the
+    check silently passes - which is exactly what happened before this
+    parameter existed, letting an impersonating session change the account's
+    password.
+    """
+    if getattr(request.state, "impersonated_by", None):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Not available while viewing as another user. End the "
+                "impersonation session and sign in as yourself to do this."
+            ),
+        )
+
+
+NoImpersonation = Annotated[None, Depends(forbid_impersonation)]
 
 
 #: Previously an email-verification gate on actions that spend real resources.

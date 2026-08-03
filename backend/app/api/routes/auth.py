@@ -7,6 +7,8 @@ per-request on the server - the role in the token is not a client-side decision.
 
 from __future__ import annotations
 
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
 from app.api.cookies import (
@@ -15,7 +17,7 @@ from app.api.cookies import (
     require_csrf,
     set_auth_cookies,
 )
-from app.api.deps import CurrentUser, DbSession
+from app.api.deps import CurrentUser, DbSession, forbid_impersonation
 from app.core.config import settings
 from app.core.crypto import decrypt_secret
 from app.core.logging import get_logger
@@ -27,6 +29,7 @@ from app.schemas.auth import (
     MFAActivateRequest,
     MFADisableRequest,
     MFASetupResponse,
+    SessionState,
     SignupRequest,
     TokenResponse,
     UserPublic,
@@ -186,9 +189,19 @@ async def logout_all(user: CurrentUser, response: Response, db: DbSession) -> Me
     return Message(detail=f"Signed out of {count} session(s)")
 
 
-@router.get("/me", response_model=UserPublic, summary="Current account")
-async def me(user: CurrentUser) -> UserPublic:
-    return UserPublic.model_validate(user)
+@router.get("/me", response_model=SessionState, summary="Current session")
+async def me(user: CurrentUser, request: Request) -> SessionState:
+    """Who this token authenticates as, and whether an admin is behind it.
+
+    The SPA reads `impersonated_by` to decide whether to show the "viewing as"
+    banner. It comes from the token's `act` claim, so it cannot be spoofed by
+    the client or drift from the credential actually presented.
+    """
+    actor = getattr(request.state, "impersonated_by", None)
+    return SessionState(
+        user=UserPublic.model_validate(user),
+        impersonated_by=uuid.UUID(actor) if actor else None,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -199,7 +212,12 @@ async def me(user: CurrentUser) -> UserPublic:
 # to. Changing your own password below still works because it is authenticated
 # by the current password rather than by a token. A user who is locked out is
 # recovered by an administrator - see admin.reset_user_password.
-@router.post("/change-password", response_model=Message, summary="Change your password")
+@router.post(
+    "/change-password",
+    response_model=Message,
+    dependencies=[Depends(forbid_impersonation)],
+    summary="Change your password",
+)
 async def change_password(
     payload: ChangePasswordRequest, user: CurrentUser, response: Response, db: DbSession
 ) -> Message:
@@ -216,7 +234,12 @@ async def change_password(
 # --------------------------------------------------------------------------- #
 # Two-factor authentication (optional; recommended for admins)
 # --------------------------------------------------------------------------- #
-@router.post("/mfa/setup", response_model=MFASetupResponse, summary="Begin TOTP enrolment")
+@router.post(
+    "/mfa/setup",
+    response_model=MFASetupResponse,
+    dependencies=[Depends(forbid_impersonation)],
+    summary="Begin TOTP enrolment",
+)
 async def mfa_setup(user: CurrentUser, db: DbSession) -> MFASetupResponse:
     if user.mfa_enabled:
         raise HTTPException(
@@ -232,7 +255,12 @@ async def mfa_setup(user: CurrentUser, db: DbSession) -> MFASetupResponse:
     )
 
 
-@router.post("/mfa/activate", response_model=Message, summary="Confirm TOTP enrolment")
+@router.post(
+    "/mfa/activate",
+    response_model=Message,
+    dependencies=[Depends(forbid_impersonation)],
+    summary="Confirm TOTP enrolment",
+)
 async def mfa_activate(
     payload: MFAActivateRequest, user: CurrentUser, db: DbSession
 ) -> Message:
@@ -251,7 +279,12 @@ async def mfa_activate(
     return Message(detail="Two-factor authentication is on")
 
 
-@router.post("/mfa/disable", response_model=Message, summary="Turn TOTP off")
+@router.post(
+    "/mfa/disable",
+    response_model=Message,
+    dependencies=[Depends(forbid_impersonation)],
+    summary="Turn TOTP off",
+)
 async def mfa_disable(
     payload: MFADisableRequest, user: CurrentUser, db: DbSession
 ) -> Message:

@@ -1,6 +1,7 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { ArrowLeft, Download, KeyRound, ShieldAlert } from 'lucide-react'
 import { Link, useParams } from 'react-router-dom'
+import { ImpersonateCard } from '@/components/admin/ImpersonateCard'
 import { ResetPasswordCard } from '@/components/admin/ResetPasswordCard'
 import { PageHeader } from '@/components/layout/AppShell'
 import { Badge } from '@/components/ui/badge'
@@ -327,6 +328,8 @@ export default function AdminUserDetail() {
             )}
           </CardContent>
         </Card>
+
+        <ImpersonateCard userId={user.id} email={user.email} isAdmin={user.role === 'admin'} />
 
         <ResetPasswordCard userId={user.id} email={user.email} />
       </div>

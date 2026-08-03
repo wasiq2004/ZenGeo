@@ -18,6 +18,7 @@ from sqlalchemy.orm import selectinload
 from app.api.deps import AdminUser, DbSession, Pagination
 from app.core.logging import get_logger
 from app.core.rate_limit import RateLimit, client_ip
+from app.core.security import create_access_token, verify_password
 from app.db.models.analytics import AdminAuditLog
 from app.db.models.audit import Audit, AuditStatus
 from app.db.models.business import Business
@@ -31,7 +32,10 @@ from app.schemas.admin import (
     AdminStats,
     AdminUserRow,
     AdminUserUpdate,
+    ImpersonateRequest,
+    ImpersonateResult,
 )
+from app.schemas.auth import UserPublic
 from app.schemas.common import Message, Page
 from app.services import admin_log, auth_service
 
@@ -42,6 +46,14 @@ log = get_logger("admin")
 # do here, and it is the only account-recovery path, so it is rate-limited and
 # written to the audit trail.
 password_reset_limit = RateLimit("20/hour", scope="admin-password-reset")
+
+# Impersonation is the most powerful thing here, so it is the most tightly
+# limited: enough for a support session, not enough to sweep an account list.
+impersonate_limit = RateLimit("10/hour", scope="admin-impersonate")
+
+#: Deliberately far shorter than a normal access token. Impersonation is for
+#: reproducing a problem, not for working as someone else all day.
+IMPERSONATION_TTL = timedelta(minutes=30)
 
 
 @router.get("/stats", response_model=AdminStats, summary="Platform-wide KPIs")
@@ -575,5 +587,108 @@ async def reset_user_password(
         detail=(
             "Password updated and every existing session signed out. Give this "
             "password to the user over a channel you trust - it cannot be shown again."
+        ),
+    )
+
+
+@router.post(
+    "/users/{user_id}/impersonate",
+    response_model=ImpersonateResult,
+    dependencies=[Depends(impersonate_limit)],
+    summary="Act as a user, to see what they see",
+)
+async def impersonate_user(
+    user_id: uuid.UUID,
+    payload: ImpersonateRequest,
+    admin: AdminUser,
+    db: DbSession,
+    request: Request,
+) -> ImpersonateResult:
+    """Mint a short-lived token that authenticates AS the target user.
+
+    The subject of the token is the target, so every ownership check, row
+    filter and permission in the application behaves exactly as it does for
+    that user - there is no parallel "admin view" code path that could drift
+    out of step with the real one. What marks the session is an extra `act`
+    claim naming the admin, which the API uses to refuse account-destructive
+    actions and the UI uses to show a persistent banner.
+
+    Three deliberate constraints:
+
+    * The admin re-enters their own password. A borrowed or hijacked admin
+      session is precisely what would otherwise become access to every account.
+    * The token lives 30 minutes, not the usual access-token lifetime. It is
+      for reproducing a problem, not for working as someone else all day.
+    * Admins cannot impersonate other admins. Lateral movement between
+      privileged accounts is the step that turns one compromise into a full
+      takeover, and no support task needs it.
+    """
+    if not verify_password(payload.password, admin.password_hash):
+        # Deliberately the same shape as a normal auth failure, and logged so
+        # repeated attempts against this endpoint are visible.
+        log.warning("impersonation_reauth_failed", admin_id=str(admin.id))
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Password is incorrect"
+        )
+
+    target = await db.get(User, user_id)
+    if target is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No such user")
+
+    if target.id == admin.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You are already signed in as yourself.",
+        )
+
+    if target.role is UserRole.admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Administrators cannot be impersonated.",
+        )
+
+    if not target.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="That account is disabled. Re-enable it first.",
+        )
+
+    token, expires_in = create_access_token(
+        user_id=target.id,
+        role=target.role.value,
+        email_verified=target.is_email_verified,
+        expires_delta=IMPERSONATION_TTL,
+        impersonated_by=admin.id,
+    )
+
+    await admin_log.record(
+        db,
+        admin_user_id=admin.id,
+        action="user.impersonate",
+        target_type="user",
+        target_id=str(target.id),
+        # The token itself is never recorded, here or in the application log.
+        metadata={"ttl_seconds": int(IMPERSONATION_TTL.total_seconds()),
+                  "reason": payload.reason or None},
+        ip_address=client_ip(request),
+    )
+    await db.commit()
+
+    log.info(
+        "impersonation_started",
+        admin_id=str(admin.id),
+        target_user_id=str(target.id),
+        ttl_seconds=int(IMPERSONATION_TTL.total_seconds()),
+    )
+
+    return ImpersonateResult(
+        access_token=token,
+        expires_in=expires_in,
+        user=UserPublic.model_validate(target),
+        impersonated_by=admin.id,
+        detail=(
+            f"Acting as {target.email} for the next "
+            f"{int(IMPERSONATION_TTL.total_seconds() // 60)} minutes. Account changes "
+            "are blocked while impersonating."
         ),
     )

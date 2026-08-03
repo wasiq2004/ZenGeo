@@ -22,6 +22,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { ImpersonationBanner } from '@/components/ImpersonationBanner'
 import { useAuth } from '@/lib/auth'
 import { initials } from '@/lib/format'
 import { cn } from '@/lib/utils'
@@ -82,7 +83,13 @@ export function AppShell({
     // Explicit `font-app` even though it is the inherited default - the shell is
     // the boundary of the authenticated product, and stating it here keeps the
     // landing font from ever leaking in through a shared ancestor.
-    <div className="flex min-h-screen bg-background font-app">
+    //
+    // The impersonation banner wraps the whole shell rather than sitting inside
+    // the content column, so it is present on every authenticated screen -
+    // user side and admin side alike - and cannot be scrolled away from.
+    <div className="min-h-screen bg-background font-app">
+      <ImpersonationBanner />
+      <div className="flex min-h-screen">
       <a
         href="#content"
         className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-primary-foreground"
@@ -204,6 +211,7 @@ export function AppShell({
           <div className="mx-auto max-w-6xl">{children}</div>
         </main>
       </div>
+    </div>
     </div>
   )
 }

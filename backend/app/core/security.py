@@ -79,8 +79,16 @@ def create_access_token(
     role: str,
     email_verified: bool,
     expires_delta: timedelta | None = None,
+    impersonated_by: uuid.UUID | str | None = None,
 ) -> tuple[str, int]:
-    """Return ``(jwt, expires_in_seconds)``."""
+    """Return ``(jwt, expires_in_seconds)``.
+
+    ``impersonated_by`` marks the token as an admin acting *as* someone else.
+    The subject stays the target user - so authorisation, ownership checks and
+    row filtering all behave exactly as they do for that user, with no parallel
+    code path to keep in step - and the extra claim is what lets the API refuse
+    destructive account actions and the UI show the "viewing as" banner.
+    """
     now = datetime.now(UTC)
     ttl = expires_delta or timedelta(minutes=settings.access_token_ttl_minutes)
     payload: dict[str, Any] = {
@@ -93,6 +101,8 @@ def create_access_token(
         "exp": int((now + ttl).timestamp()),
         "jti": secrets.token_urlsafe(12),
     }
+    if impersonated_by is not None:
+        payload["act"] = str(impersonated_by)
     token = jwt.encode(payload, settings.jwt_secret_key.get_secret_value(), algorithm=ALGORITHM)
     return token, int(ttl.total_seconds())
 

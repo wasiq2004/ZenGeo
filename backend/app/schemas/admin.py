@@ -14,7 +14,7 @@ from typing import Any, Literal
 from pydantic import Field, field_validator
 
 from app.db.models.user import UserRole
-from app.schemas.auth import MIN_PASSWORD_LENGTH, validate_password_strength
+from app.schemas.auth import MIN_PASSWORD_LENGTH, UserPublic, validate_password_strength
 from app.schemas.common import ORMModel, StrictModel
 
 
@@ -113,3 +113,24 @@ class AdminAuditRow(StrictModel):
 
 
 AdminUserSort = Literal["created_at", "last_login_at", "email", "audit_count"]
+
+
+class ImpersonateRequest(StrictModel):
+    """An admin's own password, re-confirmed before acting as someone else.
+
+    Re-authentication is required because a stolen or borrowed admin session is
+    exactly the thing impersonation would turn into full account access.
+    """
+
+    password: str = Field(min_length=1, max_length=128)
+    reason: str = Field(default="", max_length=300)
+
+
+class ImpersonateResult(StrictModel):
+    access_token: str
+    token_type: str = "bearer"  # noqa: S105 - the OAuth scheme name, not a secret
+    expires_in: int
+    #: Who the admin is now acting as.
+    user: UserPublic
+    impersonated_by: uuid.UUID
+    detail: str

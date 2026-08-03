@@ -5,11 +5,11 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
 
 from app.api.cookies import clear_auth_cookies
-from app.api.deps import CurrentUser, DbSession
+from app.api.deps import CurrentUser, DbSession, forbid_impersonation
 from app.core.logging import get_logger
 from app.core.security import verify_password
 from app.db.models.audit import Audit
@@ -36,7 +36,12 @@ async def update_profile(
     return UserPublic.model_validate(user)
 
 
-@router.post("/me/email", response_model=Message, summary="Change your email address")
+@router.post(
+    "/me/email",
+    response_model=Message,
+    dependencies=[Depends(forbid_impersonation)],
+    summary="Change your email address",
+)
 async def change_email(
     payload: EmailChangeRequest, user: CurrentUser, db: DbSession
 ) -> Message:
@@ -141,7 +146,12 @@ async def export_data(user: CurrentUser, db: DbSession) -> dict[str, Any]:
     }
 
 
-@router.post("/me/delete", response_model=Message, summary="Delete your account and all data")
+@router.post(
+    "/me/delete",
+    response_model=Message,
+    dependencies=[Depends(forbid_impersonation)],
+    summary="Delete your account and all data",
+)
 async def delete_account(
     payload: AccountDeleteRequest, user: CurrentUser, response: Response, db: DbSession
 ) -> Message:

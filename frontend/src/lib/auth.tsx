@@ -19,11 +19,22 @@ import {
 import { api, refreshAccessToken, setAccessToken, setUnauthorizedHandler } from './api'
 import type { TokenResponse, User } from './types'
 
+/** What GET /auth/me returns: the account, plus who is acting as it. */
+interface SessionState {
+  user: User
+  impersonated_by: string | null
+}
+
 interface AuthContextValue {
   user: User | null
   isLoading: boolean
   isAuthenticated: boolean
   isAdmin: boolean
+  /** Set when an admin is signed in AS this user. Read from the token's `act`
+   *  claim server-side, so the client cannot fake or clear it. */
+  impersonatedBy: string | null
+  startImpersonation: (token: string, expiresIn: number) => Promise<void>
+  endImpersonation: () => Promise<void>
   login: (email: string, password: string, totpCode?: string) => Promise<User>
   signup: (email: string, password: string, fullName?: string) => Promise<User>
   logout: () => Promise<void>
@@ -38,6 +49,7 @@ const REFRESH_MARGIN_MS = 60_000
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUserState] = useState<User | null>(null)
+  const [impersonatedBy, setImpersonatedBy] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const refreshTimer = useRef<number | undefined>(undefined)
 
@@ -80,9 +92,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (cancelled) return
       if (restored) {
         try {
-          const me = await api.get<User>('/auth/me')
+          const me = await api.get<SessionState>('/auth/me')
           if (!cancelled) {
-            setUserState(me)
+            setUserState(me.user)
+            setImpersonatedBy(me.impersonated_by)
             // Token TTL is 15 min server-side; re-arm on that cadence.
             scheduleRefresh(15 * 60)
           }
@@ -136,13 +149,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [clearSession])
 
   const refreshUser = useCallback(async () => {
-    const me = await api.get<User>('/auth/me')
-    setUserState(me)
+    const me = await api.get<SessionState>('/auth/me')
+    setUserState(me.user)
+    setImpersonatedBy(me.impersonated_by)
   }, [])
+
+  /** Swap the admin's token for the impersonation token and adopt that session. */
+  const startImpersonation = useCallback(
+    async (token: string, expiresIn: number) => {
+      setAccessToken(token)
+      const me = await api.get<SessionState>('/auth/me')
+      setUserState(me.user)
+      setImpersonatedBy(me.impersonated_by)
+      scheduleRefresh(expiresIn)
+    },
+    [scheduleRefresh],
+  )
+
+  /**
+   * Leave the impersonated session.
+   *
+   * The refresh cookie was never replaced - only the in-memory access token
+   * was - so exchanging it returns the admin to their own session without a
+   * second login. That is also why the impersonation token is memory-only: a
+   * page reload already drops back to the admin.
+   */
+  const endImpersonation = useCallback(async () => {
+    setAccessToken(null)
+    const restored = await refreshAccessToken()
+    if (!restored) {
+      clearSession()
+      return
+    }
+    const me = await api.get<SessionState>('/auth/me')
+    setUserState(me.user)
+    setImpersonatedBy(me.impersonated_by)
+    scheduleRefresh(15 * 60)
+  }, [clearSession, scheduleRefresh])
 
   const value = useMemo<AuthContextValue>(
     () => ({
       user,
+      impersonatedBy,
+      startImpersonation,
+      endImpersonation,
       isLoading,
       isAuthenticated: user !== null,
       isAdmin: user?.role === 'admin',
