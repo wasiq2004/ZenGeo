@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import Field, field_validator
+from pydantic import EmailStr, Field, field_validator
 
 from app.db.models.user import UserRole
 from app.schemas.auth import MIN_PASSWORD_LENGTH, UserPublic, validate_password_strength
@@ -61,6 +61,26 @@ class AdminUserRow(ORMModel):
     #: Providers with a key connected. Never the keys themselves.
     api_key_providers: list[str] = Field(default_factory=list)
     last_audit_at: datetime | None = None
+
+
+class AdminUserCreate(StrictModel):
+    """An account created by an administrator rather than by signup.
+
+    The password is set here and handed over out of band - there is no mail
+    transport to send an invitation with, so an admin-created account has to
+    arrive with credentials already in it.
+    """
+
+    email: EmailStr
+    password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=128)
+    full_name: str | None = Field(default=None, max_length=200)
+    role: UserRole = UserRole.user
+    reason: str = Field(default="", max_length=300)
+
+    @field_validator("password")
+    @classmethod
+    def _strength(cls, v: str) -> str:
+        return validate_password_strength(v)
 
 
 class AdminUserUpdate(StrictModel):

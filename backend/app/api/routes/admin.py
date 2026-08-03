@@ -30,6 +30,7 @@ from app.schemas.admin import (
     AdminPasswordReset,
     AdminPasswordResetResult,
     AdminStats,
+    AdminUserCreate,
     AdminUserRow,
     AdminUserUpdate,
     ImpersonateRequest,
@@ -692,3 +693,56 @@ async def impersonate_user(
             "are blocked while impersonating."
         ),
     )
+
+
+@router.post(
+    "/users",
+    response_model=AdminUserRow,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create an account on someone's behalf",
+)
+async def create_user_account(
+    payload: AdminUserCreate,
+    admin: AdminUser,
+    db: DbSession,
+    request: Request,
+) -> AdminUserRow:
+    """Create an account directly, credentials and all.
+
+    No mail leaves this deployment, so there is no invitation to send - the
+    admin sets the password here and passes it on out of band, the same shape
+    as the recovery flow in reset_user_password.
+
+    Creating an administrator is permitted but recorded distinctly in the audit
+    trail: it is the one action here that hands over the whole panel.
+    """
+    try:
+        user = await auth_service.create_user(
+            db,
+            email=str(payload.email),
+            password=payload.password,
+            full_name=payload.full_name,
+            role=payload.role,
+        )
+    except auth_service.EmailAlreadyRegistered as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.detail) from exc
+
+    await admin_log.record(
+        db,
+        admin_user_id=admin.id,
+        action="user.create_admin" if payload.role is UserRole.admin else "user.create",
+        target_type="user",
+        target_id=str(user.id),
+        # The password is never written to the trail.
+        metadata={"role": payload.role.value, "reason": payload.reason or None},
+        ip_address=client_ip(request),
+    )
+    await db.commit()
+
+    log.info(
+        "admin_created_user",
+        admin_id=str(admin.id),
+        user_id=str(user.id),
+        role=payload.role.value,
+    )
+    return _user_row(user, 0, 0, None, [])

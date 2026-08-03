@@ -1,7 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { LogOut, Search, Shield, ShieldOff, UserCheck, UserX } from 'lucide-react'
+import { LogIn, LogOut, Search, Shield, ShieldOff, UserCheck, UserPlus, UserX } from 'lucide-react'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
+import { CreateUserDialog } from '@/components/admin/CreateUserDialog'
+import { ImpersonateDialog } from '@/components/admin/ImpersonateDialog'
 import { PageHeader } from '@/components/layout/AppShell'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -56,6 +58,9 @@ export default function AdminUsers() {
   if (search) params.set('search', search)
   if (roleFilter !== 'all') params.set('role', roleFilter)
 
+  const [creating, setCreating] = useState(false)
+  const [impersonating, setImpersonating] = useState<AdminUserRow | null>(null)
+
   const usersQuery = useQuery({
     queryKey: ['admin-users', page, search, roleFilter],
     queryFn: () => api.get<Paginated<AdminUserRow>>(`/admin/users?${params}`),
@@ -104,7 +109,22 @@ export default function AdminUsers() {
 
   return (
     <>
-      <PageHeader title="Users" description={`${total} account${total === 1 ? '' : 's'}.`} />
+      <PageHeader
+        title="Users"
+        description={`${total} account${total === 1 ? '' : 's'}.`}
+        actions={
+          <Button onClick={() => setCreating(true)}>
+            <UserPlus aria-hidden="true" /> Add user
+          </Button>
+        }
+      />
+
+      <CreateUserDialog open={creating} onOpenChange={setCreating} />
+      <ImpersonateDialog
+        user={impersonating}
+        open={impersonating !== null}
+        onOpenChange={(open) => !open && setImpersonating(null)}
+      />
 
       {/* One filter row above everything it scopes. */}
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end">
@@ -303,6 +323,28 @@ export default function AdminUsers() {
                                 ) : (
                                   <UserCheck aria-hidden="true" />
                                 )}
+                              </Button>
+                            </span>
+                          </Tooltip>
+
+                          <Tooltip
+                            content={
+                              isSelf
+                                ? 'You are already signed in as yourself'
+                                : user.role === 'admin'
+                                  ? 'Administrators cannot be impersonated'
+                                  : `Sign in as ${user.email}`
+                            }
+                          >
+                            <span>
+                              <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                disabled={isSelf || user.role === 'admin' || !user.is_active}
+                                aria-label={`Sign in as ${user.email}`}
+                                onClick={() => setImpersonating(user)}
+                              >
+                                <LogIn aria-hidden="true" />
                               </Button>
                             </span>
                           </Tooltip>
