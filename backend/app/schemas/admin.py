@@ -154,3 +154,23 @@ class ImpersonateResult(StrictModel):
     user: UserPublic
     impersonated_by: uuid.UUID
     detail: str
+
+
+class AdminUserDelete(StrictModel):
+    """Typed confirmation for an irreversible deletion.
+
+    The admin retypes the account's email. A checkbox is too easy to click by
+    reflex for something that cascades through every audit and report the user
+    ever produced.
+    """
+
+    confirm_email: str = Field(min_length=3, max_length=320)
+    reason: str = Field(default="", max_length=300)
+
+
+class AdminUserDeleteResult(StrictModel):
+    email: str
+    audits_deleted: int
+    businesses_deleted: int
+    reports_removed: int
+    detail: str

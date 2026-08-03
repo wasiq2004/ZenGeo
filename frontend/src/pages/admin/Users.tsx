@@ -1,23 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { LogIn, LogOut, Search, Shield, ShieldOff, UserCheck, UserPlus, UserX } from 'lucide-react'
+import { LogIn, LogOut, Pencil, Search, Trash2, UserPlus } from 'lucide-react'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { CreateUserDialog } from '@/components/admin/CreateUserDialog'
+import { DeleteUserDialog } from '@/components/admin/DeleteUserDialog'
+import { EditUserDialog } from '@/components/admin/EditUserDialog'
 import { ImpersonateDialog } from '@/components/admin/ImpersonateDialog'
 import { PageHeader } from '@/components/layout/AppShell'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
 import { EmptyState, Skeleton } from '@/components/ui/feedback'
-import { Field, Input, Textarea } from '@/components/ui/input'
+import { Field, Input } from '@/components/ui/input'
 import { Tooltip } from '@/components/ui/misc'
 import {
   Select,
@@ -28,19 +22,12 @@ import {
 } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useToast } from '@/components/ui/toast'
-import { api, ApiError } from '@/lib/api'
+import { api } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { formatRelative, initials } from '@/lib/format'
 import { PROVIDER_LABEL } from '@/lib/geo'
-import type { AdminUserRow, Paginated, UserRole } from '@/lib/types'
+import type { AdminUserRow, Paginated } from '@/lib/types'
 
-interface PendingChange {
-  user: AdminUserRow
-  role?: UserRole
-  isActive?: boolean
-  title: string
-  body: string
-}
 
 export default function AdminUsers() {
   const { user: me } = useAuth()
@@ -51,8 +38,6 @@ export default function AdminUsers() {
   const [search, setSearch] = useState('')
   const [searchInput, setSearchInput] = useState('')
   const [roleFilter, setRoleFilter] = useState<string>('all')
-  const [pending, setPending] = useState<PendingChange | null>(null)
-  const [reason, setReason] = useState('')
 
   const params = new URLSearchParams({ page: String(page), page_size: '25' })
   if (search) params.set('search', search)
@@ -60,6 +45,8 @@ export default function AdminUsers() {
 
   const [creating, setCreating] = useState(false)
   const [impersonating, setImpersonating] = useState<AdminUserRow | null>(null)
+  const [deleting, setDeleting] = useState<AdminUserRow | null>(null)
+  const [editing, setEditing] = useState<AdminUserRow | null>(null)
 
   const usersQuery = useQuery({
     queryKey: ['admin-users', page, search, roleFilter],
@@ -73,26 +60,6 @@ export default function AdminUsers() {
     queryClient.invalidateQueries({ queryKey: ['admin-activity'] })
   }
 
-  const update = useMutation({
-    mutationFn: (change: PendingChange) =>
-      api.patch(`/admin/users/${change.user.id}`, {
-        ...(change.role !== undefined ? { role: change.role } : {}),
-        ...(change.isActive !== undefined ? { is_active: change.isActive } : {}),
-        reason: reason.trim() || null,
-      }),
-    onSuccess: () => {
-      invalidate()
-      setPending(null)
-      setReason('')
-      toast({ title: 'User updated', variant: 'success' })
-    },
-    onError: (error) =>
-      toast({
-        title: 'Could not update that user',
-        description: error instanceof ApiError ? error.message : undefined,
-        variant: 'error',
-      }),
-  })
 
   const forceLogout = useMutation({
     mutationFn: (user: AdminUserRow) => api.post<{ detail: string }>(`/admin/users/${user.id}/force-logout`),
@@ -124,6 +91,16 @@ export default function AdminUsers() {
         user={impersonating}
         open={impersonating !== null}
         onOpenChange={(open) => !open && setImpersonating(null)}
+      />
+      <EditUserDialog
+        user={editing}
+        open={editing !== null}
+        onOpenChange={(open) => !open && setEditing(null)}
+      />
+      <DeleteUserDialog
+        user={deleting}
+        open={deleting !== null}
+        onOpenChange={(open) => !open && setDeleting(null)}
       />
 
       {/* One filter row above everything it scopes. */}
@@ -252,88 +229,12 @@ export default function AdminUsers() {
                           <Tooltip
                             content={
                               isSelf
-                                ? 'You cannot change your own role'
-                                : user.role === 'admin'
-                                  ? 'Demote to user'
-                                  : 'Promote to admin'
-                            }
-                          >
-                            <span>
-                              <Button
-                                variant="ghost"
-                                size="icon-sm"
-                                disabled={isSelf}
-                                aria-label={
-                                  user.role === 'admin' ? 'Demote to user' : 'Promote to admin'
-                                }
-                                onClick={() =>
-                                  setPending({
-                                    user,
-                                    role: user.role === 'admin' ? 'user' : 'admin',
-                                    title:
-                                      user.role === 'admin'
-                                        ? 'Demote this administrator?'
-                                        : 'Promote to administrator?',
-                                    body:
-                                      user.role === 'admin'
-                                        ? `${user.email} will lose access to the admin panel.`
-                                        : `${user.email} will get full access to the admin panel, including every user and audit.`,
-                                  })
-                                }
-                              >
-                                {user.role === 'admin' ? (
-                                  <ShieldOff aria-hidden="true" />
-                                ) : (
-                                  <Shield aria-hidden="true" />
-                                )}
-                              </Button>
-                            </span>
-                          </Tooltip>
-
-                          <Tooltip
-                            content={
-                              isSelf
-                                ? 'You cannot disable your own account'
-                                : user.is_active
-                                  ? 'Disable this account'
-                                  : 'Re-enable this account'
-                            }
-                          >
-                            <span>
-                              <Button
-                                variant="ghost"
-                                size="icon-sm"
-                                disabled={isSelf}
-                                aria-label={user.is_active ? 'Disable account' : 'Enable account'}
-                                onClick={() =>
-                                  setPending({
-                                    user,
-                                    isActive: !user.is_active,
-                                    title: user.is_active
-                                      ? 'Disable this account?'
-                                      : 'Re-enable this account?',
-                                    body: user.is_active
-                                      ? `${user.email} will be signed out everywhere and will not be able to sign in again.`
-                                      : `${user.email} will be able to sign in again.`,
-                                  })
-                                }
-                              >
-                                {user.is_active ? (
-                                  <UserX aria-hidden="true" />
-                                ) : (
-                                  <UserCheck aria-hidden="true" />
-                                )}
-                              </Button>
-                            </span>
-                          </Tooltip>
-
-                          <Tooltip
-                            content={
-                              isSelf
                                 ? 'You are already signed in as yourself'
                                 : user.role === 'admin'
                                   ? 'Administrators cannot be impersonated'
-                                  : `Sign in as ${user.email}`
+                                  : !user.is_active
+                                    ? 'This account is disabled'
+                                    : `Sign in as ${user.email}`
                             }
                           >
                             <span>
@@ -345,6 +246,45 @@ export default function AdminUsers() {
                                 onClick={() => setImpersonating(user)}
                               >
                                 <LogIn aria-hidden="true" />
+                              </Button>
+                            </span>
+                          </Tooltip>
+
+                          <Tooltip
+                            content={
+                              isSelf ? 'You cannot change your own role' : 'Edit role and access'
+                            }
+                          >
+                            <span>
+                              <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                disabled={isSelf}
+                                aria-label={`Edit ${user.email}`}
+                                onClick={() => setEditing(user)}
+                              >
+                                <Pencil aria-hidden="true" />
+                              </Button>
+                            </span>
+                          </Tooltip>
+
+                          <Tooltip
+                            content={
+                              isSelf
+                                ? 'You cannot delete your own account'
+                                : `Delete ${user.email} permanently`
+                            }
+                          >
+                            <span>
+                              <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                disabled={isSelf}
+                                aria-label={`Delete ${user.email}`}
+                                className="text-destructive hover:text-destructive"
+                                onClick={() => setDeleting(user)}
+                              >
+                                <Trash2 aria-hidden="true" />
                               </Button>
                             </span>
                           </Tooltip>
@@ -394,42 +334,6 @@ export default function AdminUsers() {
         </div>
       )}
 
-      <Dialog open={pending !== null} onOpenChange={(open) => !open && setPending(null)}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>{pending?.title}</DialogTitle>
-            <DialogDescription>{pending?.body}</DialogDescription>
-          </DialogHeader>
-
-          <Field
-            label="Reason"
-            hint="Recorded in the admin activity log alongside this change"
-          >
-            {(props) => (
-              <Textarea
-                {...props}
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                rows={3}
-                placeholder="Support request #482"
-              />
-            )}
-          </Field>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setPending(null)}>
-              Cancel
-            </Button>
-            <Button
-              loading={update.isPending}
-              onClick={() => pending && update.mutate(pending)}
-              variant={pending?.isActive === false ? 'destructive' : 'default'}
-            >
-              Confirm
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <p className="mt-4 text-xs text-muted-foreground">
         Every change here is written to the activity log with your account, the target user and

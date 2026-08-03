@@ -31,6 +31,8 @@ from app.schemas.admin import (
     AdminPasswordResetResult,
     AdminStats,
     AdminUserCreate,
+    AdminUserDelete,
+    AdminUserDeleteResult,
     AdminUserRow,
     AdminUserUpdate,
     ImpersonateRequest,
@@ -39,6 +41,7 @@ from app.schemas.admin import (
 from app.schemas.auth import UserPublic
 from app.schemas.common import Message, Page
 from app.services import admin_log, auth_service
+from app.services import report as report_service
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 log = get_logger("admin")
@@ -746,3 +749,112 @@ async def create_user_account(
         role=payload.role.value,
     )
     return _user_row(user, 0, 0, None, [])
+
+
+@router.delete(
+    "/users/{user_id}",
+    response_model=AdminUserDeleteResult,
+    summary="Delete an account and everything it owns",
+)
+async def delete_user_account(
+    user_id: uuid.UUID,
+    payload: AdminUserDelete,
+    admin: AdminUser,
+    db: DbSession,
+    request: Request,
+) -> AdminUserDeleteResult:
+    """Erase a user permanently.
+
+    Every child row cascades from `users.id` - businesses, audits, events,
+    sessions and encrypted API keys - so one DELETE removes the lot. What does
+    NOT cascade is the PDF on the reports volume: those are files, not rows, and
+    deleting the audit that points at one would otherwise leave it orphaned on
+    disk forever. They are removed here, before the user row goes, while the
+    paths are still readable.
+
+    Guards: an admin cannot delete themselves, and cannot remove the last
+    remaining administrator - that would leave the panel unreachable with no way
+    back in, since this deployment sends no email.
+    """
+    user = await db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No such user")
+
+    if user.id == admin.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You cannot delete your own account from here.",
+        )
+
+    if payload.confirm_email.strip().lower() != user.email.lower():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The email you typed does not match this account.",
+        )
+
+    if user.role is UserRole.admin:
+        remaining = await db.scalar(
+            select(func.count())
+            .select_from(User)
+            .where(User.role == UserRole.admin, User.id != user.id)
+        )
+        if not remaining:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "That is the last administrator. Promote someone else first, or "
+                    "you will lock yourself out of the panel."
+                ),
+            )
+
+    audits = list(await db.scalars(select(Audit).where(Audit.user_id == user.id)))
+    businesses_deleted = (
+        await db.scalar(
+            select(func.count()).select_from(Business).where(Business.user_id == user.id)
+        )
+        or 0
+    )
+
+    # Files first, while the rows that name them still exist.
+    reports_removed = 0
+    for audit in audits:
+        if audit.pdf_report_path:
+            report_service.delete_report_file(audit)
+            reports_removed += 1
+
+    email = user.email
+    await db.delete(user)
+
+    await admin_log.record(
+        db,
+        admin_user_id=admin.id,
+        action="user.delete",
+        target_type="user",
+        # The row is going, so the id is recorded as text for the trail to keep.
+        target_id=str(user_id),
+        metadata={
+            "email": email,
+            "audits_deleted": len(audits),
+            "businesses_deleted": businesses_deleted,
+            "reports_removed": reports_removed,
+            "reason": payload.reason or None,
+        },
+        ip_address=client_ip(request),
+    )
+    await db.commit()
+
+    log.info(
+        "admin_deleted_user",
+        admin_id=str(admin.id),
+        deleted_user_id=str(user_id),
+        audits_deleted=len(audits),
+        reports_removed=reports_removed,
+    )
+
+    return AdminUserDeleteResult(
+        email=email,
+        audits_deleted=len(audits),
+        businesses_deleted=businesses_deleted,
+        reports_removed=reports_removed,
+        detail=f"{email} and everything they owned has been deleted.",
+    )
