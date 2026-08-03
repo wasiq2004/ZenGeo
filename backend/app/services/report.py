@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import re
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -37,12 +37,6 @@ _env = Environment(
     lstrip_blocks=True,
 )
 
-EFFORT_LABELS = {
-    "quick_win": "Quick wins",
-    "medium": "Medium effort",
-    "strategic": "Strategic",
-}
-
 PILLAR_ORDER = list(PILLAR_WEIGHTS)
 
 
@@ -57,18 +51,6 @@ def report_path(audit_id: uuid.UUID) -> Path:
     return reports_dir() / f"{audit_id}.pdf"
 
 
-def _band_colour(score: float | None) -> str:
-    if score is None:
-        return "#6b7280"
-    if score >= 80:
-        return "#16a34a"
-    if score >= 60:
-        return "#0ea5e9"
-    if score >= 40:
-        return "#f59e0b"
-    return "#dc2626"
-
-
 def _safe_filename(business_name: str, audit_id: uuid.UUID) -> str:
     """A download filename that cannot escape a directory or break a header."""
     slug = re.sub(r"[^A-Za-z0-9]+", "-", business_name).strip("-").lower()[:60]
@@ -81,30 +63,29 @@ def build_context(audit: Audit) -> dict[str, Any]:
     pillars = [pillar_scores[key] for key in PILLAR_ORDER if key in pillar_scores]
 
     recommendations = audit.recommendations or []
-    grouped: dict[str, list[dict[str, Any]]] = {key: [] for key in EFFORT_LABELS}
-    for rec in recommendations:
-        grouped.setdefault(str(rec.get("effort", "medium")), []).append(rec)
-
     sov = audit.share_of_voice_results or {}
     score = float(audit.geo_score) if audit.geo_score is not None else 0.0
 
+    generated_at = datetime.now(UTC)
+
     return {
-        "audit": audit,
         "business": audit.business,
-        "generated_at": datetime.now(UTC),
+        "generated_at": generated_at,
+        # Computed here rather than in the template: Jinja has no timedelta, and
+        # the fortnight is a judgement about how long schema and llms.txt take to
+        # be re-crawled, which belongs in code where it can be explained.
+        "recheck_at": generated_at + timedelta(days=14),
         "score": score,
         "band": audit.score_band or "Poor",
-        "band_colour": _band_colour(score),
         "pillars": pillars,
-        "grouped_recommendations": [
-            (EFFORT_LABELS[key], grouped.get(key, [])) for key in EFFORT_LABELS
-        ],
+        # Already ordered by impact, then effort, then pillar headroom
+        # (scoring.prioritise_recommendations). The report takes the head of
+        # this list rather than re-sorting, so page 4 and the dashboard can
+        # never disagree about what comes first.
+        "recommendations": recommendations,
         "recommendation_count": len(recommendations),
         "sov": sov,
         "sov_results": sov.get("results") or [],
-        "raw_findings": audit.raw_findings or {},
-        "questionnaire": audit.questionnaire_answers or {},
-        "band_colour_for": _band_colour,
     }
 
 

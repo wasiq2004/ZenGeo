@@ -1,471 +1,491 @@
-{# GEO audit PDF report. Rendered by WeasyPrint - print CSS only, no JS. #}
+{#
+  GEO audit report - four pages, deliberately.
+
+  The previous version ran to fifteen: a pass/fail line for every check on every
+  pillar, then an appendix repeating the raw findings. Nobody reads that. This
+  one is built to be skimmed in about two minutes - a score, where the points
+  went, what cited sites do differently, and what to fix first - with the full
+  detail left to the dashboard, which can paginate and filter in ways paper
+  cannot.
+
+  Charts are hand-drawn SVG and CSS bars rather than images: WeasyPrint renders
+  inline SVG natively, so marks stay vector-sharp at print resolution and the
+  file stays small. No chart library is involved.
+
+  Colours are the product's cyan/gold brand, stepped darker for paper. The
+  on-screen dark-mode steps (#2dc6de, #f5c518) measure 2.05:1 and 1.63:1 on
+  white and would be unreadable here.
+
+  Page count is enforced by construction: each page is one section with
+  `break-after`, and the two lists that could grow without bound - pillars and
+  actions - are capped rather than trusted to fit.
+#}
 <!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>CheckGEO.ai — {{ business.name }}</title>
+    <title>GEO audit — {{ business.name }}</title>
     <style>
       @page {
         size: A4;
-        margin: 18mm 16mm 20mm 16mm;
+        margin: 13mm 12mm 15mm 12mm;
         @bottom-left {
-          content: "CheckGEO.ai — {{ business.name }}";
-          font-size: 8pt;
-          color: #6b7280;
+          content: "checkgeo.ai · generated {{ generated_at.strftime('%d %b %Y') }}";
+          font-size: 7pt;
+          color: #8a8f98;
         }
         @bottom-right {
           content: "Page " counter(page) " of " counter(pages);
-          font-size: 8pt;
-          color: #6b7280;
+          font-size: 7pt;
+          color: #8a8f98;
         }
-      }
-      @page :first {
-        margin: 0;
-        @bottom-left { content: ""; }
-        @bottom-right { content: ""; }
       }
 
       * { box-sizing: border-box; }
+
       body {
-        font-family: "DejaVu Sans", sans-serif;
-        font-size: 9.5pt;
-        line-height: 1.55;
-        color: #111827;
         margin: 0;
+        font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+        font-size: 8.5pt;
+        line-height: 1.42;
+        color: #10151c;
       }
-      h1, h2, h3 { color: #0f172a; line-height: 1.25; }
-      h2 {
-        font-size: 15pt;
-        margin: 0 0 4mm 0;
-        padding-bottom: 2mm;
-        border-bottom: 1.5pt solid #e5e7eb;
-      }
-      h3 { font-size: 11pt; margin: 0 0 2mm 0; }
-      p { margin: 0 0 2.5mm 0; }
-      .muted { color: #6b7280; }
-      .small { font-size: 8.5pt; }
 
-      /* ---------- Cover ---------- */
-      .cover {
-        height: 297mm;
-        padding: 30mm 22mm;
-        background: linear-gradient(160deg, #111827 0%, #1e1b4b 55%, #312e81 100%);
-        color: #fff;
-        page-break-after: always;
-      }
-      .cover .eyebrow {
-        font-size: 9pt;
-        letter-spacing: 2.5pt;
-        text-transform: uppercase;
-        color: #a5b4fc;
-        margin-bottom: 6mm;
-      }
-      .cover h1 { font-size: 30pt; color: #fff; margin: 0 0 3mm 0; }
-      .cover .url { font-size: 11pt; color: #c7d2fe; margin-bottom: 18mm; }
-      .score-block {
-        border: 1.5pt solid rgba(255, 255, 255, 0.22);
-        border-radius: 5mm;
-        padding: 10mm;
-        background: rgba(255, 255, 255, 0.06);
-        margin-bottom: 12mm;
-      }
-      .score-number { font-size: 58pt; font-weight: bold; line-height: 1; }
-      .score-of { font-size: 16pt; color: #c7d2fe; }
-      .score-band {
-        display: inline-block;
-        margin-top: 3mm;
-        padding: 1.5mm 5mm;
-        border-radius: 20mm;
-        font-size: 11pt;
-        font-weight: bold;
-        color: #0f172a;
-        background: {{ band_colour }};
-      }
-      .cover-meta { font-size: 9.5pt; color: #c7d2fe; }
-      .cover-meta strong { color: #fff; }
+      /* One section per page. `break-after: page` rather than a bare
+         page-break, so a tall child cannot silently add a fifth page. */
+      .page { break-after: page; }
+      .page:last-of-type { break-after: auto; }
 
-      /* ---------- Layout ---------- */
-      section { page-break-inside: avoid; margin-bottom: 9mm; }
-      .page-break { page-break-before: always; }
-
-      table { width: 100%; border-collapse: collapse; margin-bottom: 4mm; }
-      th, td {
-        text-align: left;
-        padding: 2mm 2.5mm;
-        border-bottom: 0.5pt solid #e5e7eb;
-        vertical-align: top;
+      .masthead {
+        display: flex; align-items: center; justify-content: space-between;
+        border-bottom: 1.5pt solid #0a7186;
+        padding-bottom: 4pt; margin-bottom: 10pt;
       }
+      .brand { display: flex; align-items: center; }
+      .brand-dot {
+        display: inline-block; width: 9pt; height: 9pt; border-radius: 9pt;
+        margin-right: 5pt;
+        background: linear-gradient(135deg, #0a7186 0%, #8a6a00 100%);
+      }
+      .brand-name { font-size: 10pt; font-weight: 700; letter-spacing: .3pt; }
+      .masthead-meta { font-size: 7pt; color: #79818d; text-align: right; }
+
+      h1 { font-size: 20pt; line-height: 1.1; margin: 0 0 2pt; letter-spacing: -.4pt; }
+      h2 { font-size: 11pt; margin: 0 0 6pt; padding-bottom: 3pt; border-bottom: .75pt solid #e3e7ec; }
+      h3 { font-size: 8.5pt; margin: 0; font-weight: 700; }
+      p { margin: 0 0 4pt; }
+      ul { margin: 0; padding-left: 11pt; }
+      .lede { font-size: 9pt; color: #454d59; }
+      .muted { color: #79818d; }
+      .tiny { font-size: 6.8pt; line-height: 1.35; }
+      .num { font-variant-numeric: tabular-nums; }
+
+      .chips { margin: 5pt 0 9pt; }
+      .chip {
+        display: inline-block; padding: 1.5pt 6pt; margin-right: 3pt;
+        border: .75pt solid #e3e7ec; border-radius: 9pt;
+        font-size: 7pt; color: #454d59;
+      }
+
+      /* Page 1 */
+      .hero { display: flex; margin-bottom: 10pt; }
+      .gauge-wrap { width: 146pt; flex-shrink: 0; text-align: center; }
+      .band-tag {
+        display: inline-block; margin-top: 1pt; padding: 2pt 9pt;
+        border-radius: 9pt; font-size: 8pt; font-weight: 700; color: #fff;
+      }
+      .prow { display: flex; align-items: center; margin-bottom: 3.2pt; }
+      .pname { width: 100pt; font-size: 7.2pt; color: #454d59; }
+      .ptrack { flex: 1; height: 6pt; background: #eef1f4; border-radius: 3pt; margin-right: 5pt; }
+      .pfill { height: 6pt; border-radius: 3pt; }
+
+      .stat-row { display: flex; margin-bottom: 9pt; }
+      .stat {
+        flex: 1; border: .75pt solid #e3e7ec; border-radius: 5pt;
+        padding: 6pt 7pt; background: #f5f7f9; margin-right: 6pt;
+      }
+      .stat:last-child { margin-right: 0; }
+      .stat-v { font-size: 14pt; font-weight: 700; line-height: 1; }
+      .stat-l { font-size: 6.8pt; color: #79818d; margin-top: 2pt; }
+
+      .summary { border-left: 2.5pt solid #0a7186; padding-left: 8pt; }
+      .summary li { margin-bottom: 3.5pt; }
+
+      /* Page 2 */
+      .grid { display: flex; flex-wrap: wrap; }
+      .card {
+        width: 48.5%; border: .75pt solid #e3e7ec; border-radius: 5pt;
+        padding: 6pt 7pt; margin: 0 3% 6pt 0;
+      }
+      .card:nth-child(2n) { margin-right: 0; }
+      .card-top { display: flex; justify-content: space-between; align-items: baseline; }
+      .card-score { font-size: 12pt; font-weight: 700; line-height: 1; }
+      .bar-track { height: 3.5pt; background: #eef1f4; border-radius: 3pt; margin: 4pt 0 3pt; }
+      .bar-fill { height: 3.5pt; border-radius: 3pt; }
+      .dots { font-size: 7.5pt; letter-spacing: .6pt; }
+      .meta-line { display: flex; justify-content: space-between; align-items: center; }
+
+      /* Page 3 */
+      table { width: 100%; border-collapse: collapse; }
       th {
-        font-size: 8pt;
-        text-transform: uppercase;
-        letter-spacing: 0.6pt;
-        color: #6b7280;
-        border-bottom: 1pt solid #d1d5db;
+        text-align: left; font-size: 6.8pt; text-transform: uppercase;
+        letter-spacing: .4pt; color: #79818d; font-weight: 600;
+        border-bottom: .75pt solid #e3e7ec; padding: 0 5pt 3.5pt 0;
       }
-      tr { page-break-inside: avoid; }
+      td { padding: 4.5pt 5pt 4.5pt 0; border-bottom: .5pt solid #f1f4f6; vertical-align: top; }
+      .them { color: #15803d; }
+      .you-bad { color: #c2410c; }
+      .box { background: #f5f7f9; border-radius: 5pt; padding: 7pt 8pt; margin-top: 7pt; }
 
-      .bar-track {
-        display: inline-block;
-        width: 28mm;
-        height: 2.6mm;
-        background: #e5e7eb;
-        border-radius: 2mm;
-        overflow: hidden;
-        vertical-align: middle;
+      /* Page 4 */
+      .pill {
+        display: inline-block; padding: 1pt 5pt; border-radius: 7pt;
+        font-size: 6.2pt; font-weight: 700; text-transform: uppercase; letter-spacing: .3pt;
       }
-      .bar-fill { display: block; height: 100%; border-radius: 2mm; }
-
-      .pillar {
-        border: 0.5pt solid #e5e7eb;
-        border-radius: 3mm;
-        padding: 5mm;
-        margin-bottom: 5mm;
-        page-break-inside: avoid;
-      }
-      .pillar-head {
-        display: flex;
-        justify-content: space-between;
-        align-items: baseline;
-        margin-bottom: 1mm;
-      }
-      .pillar-score { font-size: 17pt; font-weight: bold; }
-      .check { margin: 1.5mm 0; padding-left: 6mm; position: relative; }
-      .check::before {
-        position: absolute;
-        left: 0;
-        top: 0;
-        font-weight: bold;
-      }
-      .check.pass::before { content: "PASS"; color: #16a34a; font-size: 6.5pt; }
-      .check.fail::before { content: "FAIL"; color: #dc2626; font-size: 6.5pt; }
-      .check.info::before { content: "NOTE"; color: #6b7280; font-size: 6.5pt; }
-
-      .rec {
-        border-left: 2.5pt solid #6366f1;
-        padding: 0 0 0 4mm;
-        margin-bottom: 4.5mm;
-        page-break-inside: avoid;
-      }
-      .rec h4 { margin: 0 0 1mm 0; font-size: 10pt; }
-      .rec-meta { font-size: 7.5pt; text-transform: uppercase; letter-spacing: 0.5pt; color: #6b7280; }
-      .rec-body { white-space: pre-wrap; font-size: 9pt; }
-      .not-actionable { border-left-color: #9ca3af; }
-
-      .tag {
-        display: inline-block;
-        padding: 0.4mm 2mm;
-        border-radius: 1.5mm;
-        font-size: 7.5pt;
-        font-weight: bold;
-      }
-      .tag-high { background: #fee2e2; color: #991b1b; }
-      .tag-medium { background: #fef3c7; color: #92400e; }
-      .tag-low { background: #f3f4f6; color: #4b5563; }
-      .tag-yes { background: #dcfce7; color: #166534; }
-      .tag-no { background: #f3f4f6; color: #6b7280; }
-
-      .callout {
-        background: #eef2ff;
-        border: 0.5pt solid #c7d2fe;
-        border-radius: 2.5mm;
-        padding: 4mm;
-        margin-bottom: 5mm;
-      }
-      .appendix pre {
-        background: #f9fafb;
-        border: 0.5pt solid #e5e7eb;
-        border-radius: 2mm;
-        padding: 3mm;
-        font-size: 7.5pt;
-        white-space: pre-wrap;
-        word-wrap: break-word;
-        font-family: "DejaVu Sans Mono", monospace;
+      .cta {
+        margin-top: 10pt; border-radius: 6pt; padding: 10pt 12pt;
+        background: #e2f2f6; border: .75pt solid #bcdde6;
       }
     </style>
   </head>
+
   <body>
-    {# ------------------------------ Cover ------------------------------ #}
-    <div class="cover">
-      <div class="eyebrow">Generative Engine Optimisation Audit</div>
-      <h1>{{ business.name }}</h1>
-      <div class="url">{{ business.website_url }}</div>
+    {% set sov_tested = sov.get('tested') %}
+    {% set mention = (sov.get('mention_rate') or 0) * 100 %}
+    {% set citation = (sov.get('citation_rate') or 0) * 100 %}
+    {% set scored = pillars | rejectattr('skipped') | list %}
+    {% set weakest = scored | sort(attribute='score') | list %}
+    {% set top_actions = recommendations[:9] %}
+    {% set remaining = recommendation_count - (top_actions | length) %}
 
-      <div class="score-block">
-        <div class="small" style="color: #a5b4fc; letter-spacing: 1.5pt; text-transform: uppercase;">
-          Overall GEO score
-        </div>
-        <div>
-          <span class="score-number">{{ '%.0f'|format(score) }}</span>
-          <span class="score-of">/ 100</span>
-        </div>
-        <div class="score-band">{{ band }}</div>
+    {#- Severity colour for any 0-100 value. One helper so a score means the
+        same thing on every page. -#}
+    {%- macro tone(v) -%}
+      {%- if v >= 80 %}#15803d{% elif v >= 60 %}#0a7186{% elif v >= 40 %}#a16207{% else %}#c2410c{% endif -%}
+    {%- endmacro -%}
+
+    {% macro masthead(label) %}
+      <div class="masthead">
+        <div class="brand"><span class="brand-dot"></span><span class="brand-name">CheckGEO.ai</span></div>
+        <div class="masthead-meta">{{ label }}<br />{{ business.name }}</div>
+      </div>
+    {% endmacro %}
+
+    <!-- ===================== PAGE 1 — snapshot ===================== -->
+    <section class="page">
+      {{ masthead("GEO audit report") }}
+
+      <h1>AI visibility audit</h1>
+      <p class="lede">{{ business.website_url }}</p>
+      <div class="chips">
+        {% if business.industry %}<span class="chip">{{ business.industry }}</span>{% endif %}
+        {% if business.location %}<span class="chip">{{ business.location }}</span>{% endif %}
+        <span class="chip">{{ generated_at.strftime('%d %B %Y') }}</span>
       </div>
 
-      <div class="cover-meta">
-        <div>Generated <strong>{{ generated_at.strftime('%d %B %Y') }}</strong></div>
-        {% if business.industry %}<div>Industry <strong>{{ business.industry }}</strong></div>{% endif %}
-        {% if business.location %}<div>Location <strong>{{ business.location }}</strong></div>{% endif %}
-        <div>Prioritised actions <strong>{{ recommendation_count }}</strong></div>
-      </div>
-    </div>
+      <div class="hero">
+        <div class="gauge-wrap">
+          {#- A meter, not a chart: one value against a limit. 270deg arc from
+              bottom-left; r=52 so the full sweep is 2*pi*52*0.75 = 245. -#}
+          <svg width="146" height="126" viewBox="0 0 140 122">
+            <g transform="rotate(135 70 60)">
+              <circle cx="70" cy="60" r="52" fill="none" stroke="#e8ecef"
+                      stroke-width="13" stroke-linecap="round" stroke-dasharray="245 327" />
+              <circle cx="70" cy="60" r="52" fill="none" stroke="{{ tone(score) }}"
+                      stroke-width="13" stroke-linecap="round"
+                      stroke-dasharray="{{ (2.45 * score) | round(1) }} 327" />
+            </g>
+            <text x="70" y="64" text-anchor="middle"
+                  style="font-size:32px;font-weight:700;fill:#10151c">{{ score | round | int }}</text>
+            <text x="70" y="79" text-anchor="middle"
+                  style="font-size:9px;fill:#79818d">out of 100</text>
+          </svg>
+          <div class="band-tag" style="background:{{ tone(score) }}">{{ band }}</div>
+        </div>
 
-    {# --------------------------- Score summary --------------------------- #}
-    <section>
-      <h2>How your score breaks down</h2>
-      <p class="muted">
-        Each pillar is scored 0–100 on its own, then combined by weight into the composite
-        score above. Pillars that could not be tested are excluded and their weight is shared
-        proportionally across the rest, so the score always sits on the same 0–100 scale.
-      </p>
-
-      <table>
-        <thead>
-          <tr>
-            <th>Pillar</th>
-            <th style="width: 18mm;">Weight</th>
-            <th style="width: 40mm;">Score</th>
-            <th style="width: 14mm;"></th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for pillar in pillars %}
-            <tr>
-              <td>
-                <strong>{{ pillar.name }}</strong>
-                {% if pillar.skipped %}<br /><span class="small muted">Not tested</span>{% endif %}
-              </td>
-              <td>
-                {% if pillar.skipped %}
-                  <span class="muted">—</span>
-                {% else %}
-                  {{ '%.0f'|format(pillar.effective_weight * 100) }}%
-                {% endif %}
-              </td>
-              <td>
-                {% if not pillar.skipped %}
-                  <span class="bar-track">
-                    <span
-                      class="bar-fill"
-                      style="width: {{ pillar.score }}%; background: {{ band_colour_for(pillar.score) }};"
-                    ></span>
-                  </span>
-                {% endif %}
-              </td>
-              <td style="text-align: right;">
-                {% if pillar.skipped %}
-                  <span class="muted">—</span>
-                {% else %}
-                  <strong>{{ '%.0f'|format(pillar.score) }}</strong>
-                {% endif %}
-              </td>
-            </tr>
+        <div style="flex:1">
+          <h2 style="margin-bottom:5pt">Where the points went</h2>
+          {#- Seven pillars, one measure, nominal categories: bars, with the
+              value on each row. A radar would make the weakest pillar - the
+              thing the reader came for - the hardest one to read. -#}
+          {% for p in pillars %}
+            {% set w = (p.effective_weight or p.weight) * 100 %}
+            <div class="prow">
+              <div class="pname">{{ p.name }}</div>
+              <div class="ptrack">
+                <div class="pfill" style="width:{{ p.score | round | int }}%;background:{{ tone(p.score) }}"></div>
+              </div>
+              <div class="num" style="width:19pt;text-align:right;font-size:8pt;font-weight:700">{{ p.score | round | int }}</div>
+              <div class="num tiny muted" style="width:21pt;text-align:right">{{ w | round | int }}%</div>
+            </div>
           {% endfor %}
-        </tbody>
-      </table>
+        </div>
+      </div>
+
+      <div class="stat-row">
+        <div class="stat">
+          <div class="stat-v num" style="color:{{ tone(score) }}">{{ score | round | int }}</div>
+          <div class="stat-l">GEO score · {{ band }}</div>
+        </div>
+        <div class="stat">
+          <div class="stat-v num">{{ recommendation_count }}</div>
+          <div class="stat-l">Prioritised actions</div>
+        </div>
+        <div class="stat">
+          <div class="stat-v num" style="color:{{ tone(mention) }}">{{ mention | round | int }}%</div>
+          <div class="stat-l">AI mention rate</div>
+        </div>
+        <div class="stat">
+          <div class="stat-v num">{{ scored | selectattr('score', 'lt', 60) | list | length }}</div>
+          <div class="stat-l">Pillars under 60</div>
+        </div>
+      </div>
+
+      <h2>What this means</h2>
+      <div class="summary">
+        <ul>
+          {% if weakest %}
+            {% set best = weakest | last %}
+            <li><strong>{{ best.name }}</strong> is your strongest pillar at
+              {{ best.score | round | int }}/100. {{ best.summary }}</li>
+          {% endif %}
+          {% if weakest | length > 1 %}
+            {% set w0 = weakest[0] %}{% set w1 = weakest[1] %}
+            <li><strong>{{ w0.name }}</strong> ({{ w0.score | round | int }}/100) and
+              <strong>{{ w1.name }}</strong> ({{ w1.score | round | int }}/100) are the two biggest
+              gaps. Together they carry
+              {{ (((w0.effective_weight or w0.weight) + (w1.effective_weight or w1.weight)) * 100) | round | int }}%
+              of the score, which makes them the fastest payback on the page-4 list.</li>
+          {% endif %}
+          {% if sov_tested %}
+            <li>Assistants mentioned you in <strong>{{ mention | round | int }}%</strong> of the
+              {{ sov.get('total_calls', 0) }} answer{{ '' if sov.get('total_calls') == 1 else 's' }}
+              tested and cited you in <strong>{{ citation | round | int }}%</strong>.
+              {% if mention < 50 %}Being readable is not the same as being quoted — closing that gap
+              is what page 3 is about.{% endif %}</li>
+          {% else %}
+            <li>Share of Voice was not tested{% if sov.get('skip_reason') %} — {{ sov.get('skip_reason') | lower }}{% endif %}.
+              Its weight was redistributed across the other pillars, so this score is still on a true
+              0–100 scale rather than capped at 85.</li>
+          {% endif %}
+        </ul>
+      </div>
     </section>
 
-    {# ------------------------- Pillar detail ------------------------- #}
-    <div class="page-break"></div>
-    <h2>Pillar by pillar</h2>
-
-    {% for pillar in pillars %}
-      <div class="pillar">
-        <div class="pillar-head">
-          <h3>{{ pillar.name }}</h3>
-          <span class="pillar-score" style="color: {{ band_colour_for(pillar.score) }};">
-            {% if pillar.skipped %}—{% else %}{{ '%.0f'|format(pillar.score) }}{% endif %}
-          </span>
-        </div>
-        <p class="muted small">
-          Weight {{ '%.0f'|format(pillar.weight * 100) }}%
-          {% if not pillar.skipped and pillar.effective_weight != pillar.weight %}
-            (counted as {{ '%.0f'|format(pillar.effective_weight * 100) }}% after redistribution)
-          {% endif %}
-        </p>
-        <p>{{ pillar.summary }}</p>
-
-        {% if pillar.checks %}
-          {% for check in pillar.checks %}
-            <div class="check {% if check.passed is none %}info{% elif check.passed %}pass{% else %}fail{% endif %}">
-              <strong>{{ check.label }}</strong>
-              {% if check.max_points > 0 %}
-                <span class="muted small">({{ check.points }}/{{ check.max_points }})</span>
-              {% endif %}
-              <br />
-              <span class="small">{{ check.detail }}</span>
-            </div>
-          {% endfor %}
-        {% endif %}
-      </div>
-    {% endfor %}
-
-    {# ------------------------ Share of Voice ------------------------ #}
-    <div class="page-break"></div>
-    <h2>AI Share of Voice</h2>
-
-    {% if not sov.tested %}
-      <div class="callout">
-        <strong>Not tested.</strong>
-        <p style="margin: 2mm 0 0 0;">{{ sov.skip_reason }}</p>
-      </div>
-    {% else %}
-      <p class="muted">
-        Your own target prompts were sent to the assistants you connected, using your own API
-        keys. {{ sov.total_calls }} call(s) across {{ sov.providers_tested|length }} provider(s){% if sov.failed_calls %}, of which {{ sov.failed_calls }} failed and are excluded from the rates below{% endif %}.
+    <!-- ===================== PAGE 2 — pillars ===================== -->
+    <section class="page">
+      {{ masthead("Pillar breakdown") }}
+      <h2>Seven pillars, scored</h2>
+      <p class="tiny muted" style="margin-bottom:7pt">
+        Each pillar is scored 0–100 on its own, then combined by weight. Filled dots are checks that
+        passed. The check-by-check detail lives in the dashboard.
       </p>
 
-      <table>
-        <tbody>
-          <tr>
-            <td><strong>Mention rate</strong><br /><span class="small muted">Answers that named you at all</span></td>
-            <td style="text-align: right; font-size: 14pt;"><strong>{{ '%.0f'|format(sov.mention_rate * 100) }}%</strong></td>
-            <td><strong>Citation rate</strong><br /><span class="small muted">Answers that linked to your domain</span></td>
-            <td style="text-align: right; font-size: 14pt;"><strong>{{ '%.0f'|format(sov.citation_rate * 100) }}%</strong></td>
-          </tr>
-        </tbody>
-      </table>
+      <div class="grid">
+        {% for p in pillars %}
+          {% set w = (p.effective_weight or p.weight) * 100 %}
+          {% set checks = p.checks or [] %}
+          {% set passed = checks | selectattr('passed') | list | length %}
+          <div class="card">
+            <div class="card-top">
+              <h3>{{ p.name }}</h3>
+              <span class="card-score num" style="color:{{ tone(p.score) }}">{{ p.score | round | int }}</span>
+            </div>
+            <div class="bar-track">
+              <div class="bar-fill" style="width:{{ p.score | round | int }}%;background:{{ tone(p.score) }}"></div>
+            </div>
+            <div class="meta-line">
+              <span class="dots" style="color:{{ tone(p.score) }}">
+                {%- if checks -%}
+                  {%- for _ in range(passed) %}●{% endfor -%}
+                  {%- for _ in range(checks | length - passed) %}<span style="color:#d5dade">○</span>{% endfor -%}
+                {%- else -%}<span class="tiny muted">not scored</span>{%- endif -%}
+              </span>
+              <span class="tiny muted num">
+                {% if checks %}{{ passed }}/{{ checks | length }} checks · {% endif %}{{ w | round | int }}% weight
+              </span>
+            </div>
+            <p class="tiny" style="margin:4pt 0 0;color:#454d59">{{ p.summary | truncate(130, true, '…') }}</p>
+          </div>
+        {% endfor %}
+      </div>
+    </section>
 
-      {% if sov.competitor_share %}
-        <h3>Competitors appearing in the same answers</h3>
-        <table>
-          <thead>
-            <tr><th>Competitor</th><th style="text-align: right; width: 30mm;">Answers</th></tr>
-          </thead>
-          <tbody>
-            {% for name, count in sov.competitor_share.items() %}
-              <tr><td>{{ name }}</td><td style="text-align: right;">{{ count }}</td></tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      {% endif %}
+    <!-- ===================== PAGE 3 — competitor lens ===================== -->
+    <section class="page">
+      {{ masthead("Competitor lens") }}
+      <h2>How AI-visible businesses do this differently</h2>
+      <p class="tiny muted" style="margin-bottom:7pt">
+        The sites assistants cite share a small set of traits. Here is how yours compares.
+      </p>
 
-      <h3>Every prompt tested</h3>
+      {% set by_key = {} %}
+      {% for p in pillars %}{% set _ = by_key.update({p.key: p}) %}{% endfor %}
+
       <table>
         <thead>
           <tr>
-            <th style="width: 50mm;">Prompt</th>
-            <th style="width: 22mm;">Provider</th>
-            <th style="width: 16mm;">Mentioned</th>
-            <th style="width: 14mm;">Cited</th>
-            <th>What the assistant said</th>
+            <th style="width:28%">Trait</th>
+            <th style="width:33%">Sites that get cited</th>
+            <th style="width:39%">Found on your site</th>
           </tr>
         </thead>
         <tbody>
-          {% for row in sov_results %}
+          {% for key, trait, ideal in [
+            ('structured_data', 'Machine-readable identity', 'Organization and FAQPage JSON-LD, fields complete'),
+            ('llms_txt',        'A brand file for models',   'llms.txt published and spec-shaped'),
+            ('crawlability',    'Open to AI crawlers',       'GPTBot, ClaudeBot and PerplexityBot all allowed'),
+            ('evidence',        'Quotable evidence',         'Dated statistics, named sources, visible bylines')
+          ] %}
+            {% set p = by_key.get(key) %}
             <tr>
-              <td class="small">{{ row.prompt }}</td>
-              <td class="small">
-                {{ row.provider }}<br /><span class="muted">{{ row.model }}</span>
-              </td>
-              <td>
-                {% if row.error %}
-                  <span class="tag tag-low">Error</span>
-                {% elif row.mentioned %}
-                  <span class="tag tag-yes">Yes</span>
-                  {% if row.position %}<br /><span class="small muted">#{{ row.position }}</span>{% endif %}
-                {% else %}
-                  <span class="tag tag-no">No</span>
-                {% endif %}
-              </td>
-              <td>
-                {% if row.cited %}
-                  <span class="tag tag-yes">Yes</span>
-                {% else %}
-                  <span class="tag tag-no">No</span>
-                {% endif %}
-              </td>
-              <td class="small">
-                {% if row.error %}
-                  <span class="muted">{{ row.error }}</span>
-                {% else %}
-                  {{ row.excerpt }}
-                  {% if row.sentiment %}
-                    <br /><span class="muted">Tone: {{ row.sentiment }}</span>
-                  {% endif %}
-                  {% if row.competitors_mentioned %}
-                    <br /><span class="muted">Also named: {{ row.competitors_mentioned|join(', ') }}</span>
-                  {% endif %}
-                {% endif %}
+              <td><strong>{{ trait }}</strong></td>
+              <td class="them">{{ ideal }}</td>
+              <td class="{{ 'them' if p and p.score >= 60 else 'you-bad' }}">
+                {% if p %}
+                  <strong class="num">{{ p.score | round | int }}/100</strong> —
+                  {{ p.summary | truncate(84, true, '…') }}
+                {% else %}Not scored{% endif %}
               </td>
             </tr>
           {% endfor %}
         </tbody>
       </table>
-      <p class="small muted">
-        Tone is a keyword heuristic over the sentences that name you, not a model judgement.
-        Citation rates are only directly comparable between web-grounded providers.
-      </p>
-    {% endif %}
 
-    {# ----------------------- Recommendations ----------------------- #}
-    <div class="page-break"></div>
-    <h2>What to do about it</h2>
-    <p class="muted">
-      Ordered by impact, then by how cheap the fix is. Start at the top.
-    </p>
-
-    {% for group_label, recs in grouped_recommendations %}
-      {% if recs %}
-        <section>
-          <h3>{{ group_label }} ({{ recs|length }})</h3>
-          {% for rec in recs %}
-            <div class="rec {% if not rec.actionable %}not-actionable{% endif %}">
-              <h4>{{ rec.title }}</h4>
-              <div class="rec-meta">
-                <span class="tag tag-{{ rec.impact }}">{{ rec.impact }} impact</span>
-                &nbsp;{{ rec.pillar.replace('_', ' ') }}
-                {% if not rec.actionable %}
-                  &nbsp;· needs someone with site-root access
-                {% endif %}
+      <h2 style="margin-top:12pt">AI Share of Voice</h2>
+      {% if sov_tested %}
+        <div style="display:flex">
+          <div style="flex:1;padding-right:12pt">
+            {% for label, value in [('Mention rate', mention), ('Citation rate', citation)] %}
+              <div style="margin-bottom:6pt">
+                <div style="display:flex;justify-content:space-between;font-size:8pt">
+                  <span>{{ label }}</span>
+                  <span class="num" style="font-weight:700;color:{{ tone(value) }}">{{ value | round | int }}%</span>
+                </div>
+                <div style="height:7pt;background:#eef1f4;border-radius:4pt;margin-top:2pt">
+                  <div style="height:7pt;border-radius:4pt;width:{{ value | round | int }}%;background:{{ tone(value) }}"></div>
+                </div>
               </div>
-              <div class="rec-body">{{ rec.detail }}</div>
-            </div>
-          {% endfor %}
-        </section>
-      {% endif %}
-    {% endfor %}
+            {% endfor %}
+            <p class="tiny muted" style="margin-top:5pt">
+              {{ sov.get('total_calls', 0) }} answer{{ '' if sov.get('total_calls') == 1 else 's' }} tested
+              across {{ sov.get('providers_tested', []) | join(', ') or 'no providers' }}.
+            </p>
+          </div>
 
-    {% if recommendation_count == 0 %}
-      <p>No issues found. Re-run this audit after your next significant content change.</p>
-    {% endif %}
-
-    {# --------------------------- Appendix --------------------------- #}
-    <div class="page-break"></div>
-    <section class="appendix">
-      <h2>Appendix: raw findings</h2>
-      <p class="muted small">
-        Exactly what the crawler observed, so every score above can be traced back to evidence.
-      </p>
-
-      {% for pillar in pillars %}
-        {% set data = raw_findings.get(pillar.key) %}
-        {% if data %}
-          <h3>{{ pillar.name }}</h3>
-          <table>
-            <tbody>
-              {% for key, value in data.items() %}
-                {% if key != 'results' %}
-                  <tr>
-                    <td style="width: 55mm;" class="small"><strong>{{ key.replace('_', ' ') }}</strong></td>
-                    <td class="small">
-                      {% if value is mapping %}
-                        {{ value|tojson }}
-                      {% elif value is iterable and value is not string %}
-                        {{ value|join(', ') if value else '—' }}
-                      {% else %}
-                        {{ value if value is not none else '—' }}
-                      {% endif %}
-                    </td>
-                  </tr>
+          <div style="flex:1">
+            <h3 style="margin-bottom:3pt">Who showed up instead</h3>
+            {% set rivals = sov.get('competitor_share') or {} %}
+            {% if rivals %}
+              {% for name, share in rivals.items() %}
+                {% if loop.index <= 5 %}
+                  <div style="display:flex;justify-content:space-between;font-size:7.5pt;
+                              padding:2.5pt 0;border-bottom:.5pt solid #f1f4f6">
+                    <span>{{ name }}</span>
+                    <span class="num muted">{{ (share * 100) | round | int }}%</span>
+                  </div>
                 {% endif %}
               {% endfor %}
-            </tbody>
-          </table>
-        {% endif %}
-      {% endfor %}
+            {% else %}
+              <p class="tiny muted">No competitor was named in the answers we tested.</p>
+            {% endif %}
+          </div>
+        </div>
 
-      <h3>Questionnaire answers</h3>
-      <pre>{{ questionnaire|tojson(indent=2) }}</pre>
+        {% set sample = sov_results | first %}
+        {% if sample and sample.get('prompt') %}
+          <div class="box">
+            <div class="tiny muted" style="margin-bottom:2pt">PROMPT TESTED</div>
+            <p style="font-style:italic;color:#454d59;margin-bottom:4pt">
+              “{{ sample.get('prompt') | truncate(148, true, '…') }}”
+            </p>
+            <p class="tiny" style="margin:0;color:#454d59">
+              {% if sample.get('mentioned') %}
+                You were mentioned{% if sample.get('cited') %} and cited as a source{% else %}, but not
+                cited — the model knew of you without treating you as a reference{% endif %}.
+              {% else %}
+                You were not mentioned.{% if sample.get('competitors_mentioned') %}
+                The assistant named {{ sample.get('competitors_mentioned') | join(', ') }} instead.{% endif %}
+                Sites that publish structured entity data and quotable evidence are the ones models
+                reach for.
+              {% endif %}
+            </p>
+          </div>
+        {% endif %}
+      {% else %}
+        <div class="box">
+          <p style="margin:0"><strong>Not tested{% if sov.get('skip_reason') %} — {{ sov.get('skip_reason') }}{% endif %}</strong></p>
+          <p class="tiny muted" style="margin:4pt 0 0">
+            Connect an AI provider key and re-run to see whether assistants mention you when asked
+            about your category. The pillar's 15% weight was redistributed across the other six, so
+            the score on page 1 is still on a true 0–100 scale.
+          </p>
+        </div>
+      {% endif %}
+    </section>
+
+    <!-- ===================== PAGE 4 — action plan ===================== -->
+    <section class="page">
+      {{ masthead("Action plan") }}
+      <h2>Fix these first</h2>
+      <p class="tiny muted" style="margin-bottom:7pt">
+        Ranked by impact, then by how cheap the fix is, then by how much weighted score the pillar is
+        leaving on the table. Work down the list.
+      </p>
+
+      <table>
+        <thead>
+          <tr>
+            <th style="width:5%">#</th>
+            <th style="width:53%">Action</th>
+            <th style="width:19%">Pillar</th>
+            <th style="width:11%">Impact</th>
+            <th style="width:12%">Effort</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for rec in top_actions %}
+            {% set imp = rec.get('impact', 'medium') %}
+            {% set eff = rec.get('effort', 'medium') %}
+            <tr>
+              <td class="num muted">{{ loop.index }}</td>
+              <td>
+                <strong>{{ rec.get('title') }}</strong>
+                <div class="tiny muted" style="margin-top:1.5pt">{{ rec.get('detail', '') | truncate(112, true, '…') }}</div>
+              </td>
+              <td class="tiny" style="color:#454d59">{{ rec.get('pillar', '') | replace('_', ' ') | title }}</td>
+              <td>
+                <span class="pill" style="color:#fff;background:{% if imp == 'high' %}#c2410c{% elif imp == 'medium' %}#a16207{% else %}#79818d{% endif %}">{{ imp }}</span>
+              </td>
+              <td>
+                <span class="pill" style="color:#10151c;background:{% if eff == 'quick_win' %}#d6f0d9{% elif eff == 'medium' %}#fbf3dc{% else %}#eef1f4{% endif %}">{{ 'quick' if eff == 'quick_win' else eff }}</span>
+              </td>
+            </tr>
+          {% endfor %}
+          {% if not top_actions %}
+            <tr><td colspan="5" class="muted">No outstanding actions — every check passed.</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+
+      {% if remaining > 0 %}
+        <p class="tiny muted" style="margin-top:6pt">
+          + {{ remaining }} further action{{ '' if remaining == 1 else 's' }} in the dashboard, including
+          everything scored as lower impact.
+        </p>
+      {% endif %}
+
+      <div class="cta">
+        <h3 style="font-size:9.5pt;margin-bottom:3pt">Re-run once the quick wins are live</h3>
+        <p class="tiny" style="margin:0 0 5pt;color:#454d59">
+          Schema and llms.txt changes are usually picked up within a fortnight. Share of Voice moves
+          last — models have to re-crawl before they will quote you, so expect that pillar to lag the
+          others by a cycle.
+        </p>
+        <p class="tiny num" style="margin:0;color:#0a7186;font-weight:700">
+          Suggested re-check: {{ recheck_at.strftime('%d %B %Y') }} &nbsp;·&nbsp; checkgeo.ai/app
+        </p>
+      </div>
     </section>
   </body>
 </html>
