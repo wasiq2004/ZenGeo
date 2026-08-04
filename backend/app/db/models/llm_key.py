@@ -30,6 +30,7 @@ class LLMProviderName(enum.StrEnum):
     openai = "openai"
     anthropic = "anthropic"
     perplexity = "perplexity"
+    groq = "groq"
 
 
 class LLMApiKey(Base, UUIDPrimaryKeyMixin, TimestampMixin):

@@ -5,7 +5,12 @@ module here that subclasses `LLMProvider` and applies `@register_provider`,
 then import it below - nothing else needs to change.
 """
 
-from app.llm import anthropic_provider, openai_provider, perplexity_provider  # noqa: F401
+from app.llm import (  # noqa: F401
+    anthropic_provider,
+    groq_provider,
+    openai_provider,
+    perplexity_provider,
+)
 from app.llm.base import (
     InvalidAPIKey,
     LLMError,

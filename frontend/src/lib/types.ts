@@ -2,7 +2,7 @@
 
 export type UserRole = 'user' | 'admin'
 export type AuditStatus = 'pending' | 'running' | 'completed' | 'failed'
-export type ProviderName = 'openai' | 'anthropic' | 'perplexity'
+export type ProviderName = 'openai' | 'anthropic' | 'perplexity' | 'groq'
 export type Effort = 'quick_win' | 'medium' | 'strategic'
 export type Impact = 'high' | 'medium' | 'low'
 

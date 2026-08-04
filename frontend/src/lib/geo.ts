@@ -155,8 +155,19 @@ export const IMPACT_VARIANT: Record<Impact, 'destructive' | 'warning' | 'muted'>
   low: 'muted',
 }
 
+/**
+ * Display names for provider keys.
+ *
+ * A fallback map, not the source of truth: the settings page reads
+ * `display_name` from /llm-keys/providers, which is generated from the backend
+ * registry. This exists for the places that only have a bare provider string -
+ * an audit result row, a report table - and a `?? name` at each call site means
+ * a provider added on the backend still renders readably before it is listed
+ * here.
+ */
 export const PROVIDER_LABEL: Record<string, string> = {
   openai: 'OpenAI (ChatGPT)',
   anthropic: 'Anthropic (Claude)',
   perplexity: 'Perplexity',
+  groq: 'Groq',
 }
