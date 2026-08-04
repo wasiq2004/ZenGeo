@@ -265,7 +265,7 @@ function Hero() {
       <div className="mx-auto max-w-6xl px-6 py-24 sm:py-32">
         <Stagger trigger="mount" className="mx-auto max-w-3xl text-center">
           <StaggerItem>
-            <Badge variant="outline" className="mb-6 gap-1.5 py-1 pl-1.5 pr-3">
+            <Badge variant="outline" className="mk-pulse mb-6 gap-1.5 py-1 pl-1.5 pr-3">
               <span
                 className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
                 style={{
@@ -322,8 +322,10 @@ function Hero() {
           animate={{ opacity: 1, y: 0 }}
           transition={reduced ? { duration: 0 } : { duration: 0.7, delay: 0.45, ease: [0.22, 1, 0.36, 1] }}
         >
-          <ScorePreview />
-          <PreviewStats />
+          <div className="mk-fade-up" style={{ animationDelay: '0.45s' }}>
+            <ScorePreview />
+            <PreviewStats />
+          </div>
         </motion.div>
       </div>
     </section>
@@ -347,7 +349,7 @@ function HowItWorks() {
         <Stagger className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
           {METHOD.map((step, index) => (
             <StaggerItem key={step.title}>
-              <Card className="mk-lift mk-spotlight h-full">
+              <Card className="mk-lift mk-spotlight mk-glass h-full">
                 <CardContent className="space-y-3 p-5">
                   <span className="inline-flex size-8 items-center justify-center rounded-lg bg-primary/12 text-sm font-semibold text-primary">
                     {index + 1}
@@ -382,7 +384,7 @@ function Pillars() {
             const Icon = PILLAR_ICONS[pillar.key] ?? Gauge
             return (
               <StaggerItem key={pillar.key}>
-                <Card className="mk-lift mk-spotlight h-full">
+                <Card className="mk-lift mk-spotlight mk-glass h-full">
                   <CardContent className="space-y-3 p-5">
                     <div className="flex items-start justify-between gap-3">
                       <span className="inline-flex size-9 items-center justify-center rounded-lg bg-primary/12 text-primary">
@@ -481,7 +483,7 @@ function Byok() {
         <Stagger className="grid gap-4 sm:grid-cols-2">
           {points.map((point) => (
             <StaggerItem key={point.title}>
-              <Card className="mk-lift mk-spotlight h-full">
+              <Card className="mk-lift mk-spotlight mk-glass h-full">
                 <CardContent className="space-y-2 p-5">
                   <point.icon className="size-4.5 text-primary" aria-hidden="true" />
                   <h3 className="text-sm font-medium">{point.title}</h3>

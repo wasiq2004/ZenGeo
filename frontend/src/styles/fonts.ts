@@ -10,6 +10,7 @@
  * `--font-landing-body` and `--font-app` in index.css):
  *   Plus Jakarta Sans - marketing headings, matching zenautomations.in
  *   Inter             - marketing body copy, same pairing as that site
+ *   Geist Mono        - figures and technical detail on the marketing surface
  *   Open Sans         - the authenticated product (user panel, admin panel)
  *
  * The marketing pair is loaded here rather than from the Google Fonts CDN the
@@ -41,6 +42,11 @@ import '@fontsource/plus-jakarta-sans/latin-800.css'
 import '@fontsource/inter/latin-400.css'
 import '@fontsource/inter/latin-500.css'
 import '@fontsource/inter/latin-600.css'
+
+// Figures, scores and technical labels on the marketing surface. Two weights
+// only - this is for numerals and short labels, never for reading.
+import '@fontsource/geist-mono/latin-400.css'
+import '@fontsource/geist-mono/latin-500.css'
 
 import '@fontsource/open-sans/latin-400.css'
 import '@fontsource/open-sans/latin-500.css'

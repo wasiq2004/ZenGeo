@@ -54,7 +54,7 @@ export function WeightBreakdown() {
                       }}
                     />
                   </span>
-                  <span className="w-11 shrink-0 text-right text-sm font-semibold tabular-nums">
+                  <span className="mk-figure w-11 shrink-0 text-right text-sm font-semibold">
                     {Math.round(pillar.weight * 100)}%
                   </span>
                 </li>

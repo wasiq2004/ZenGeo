@@ -73,7 +73,7 @@ export default {
         app: ['var(--font-app)'],
         landing: ['var(--font-landing)'],
         'landing-body': ['var(--font-landing-body)'],
-        mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
+        mono: ['var(--font-mono)', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
       },
       keyframes: {
         'accordion-down': {
