@@ -23,6 +23,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AssistantMarquee } from '@/components/landing/AssistantMarquee'
 import { PreviewStats, ScorePreview } from '@/components/landing/ScorePreview'
+import { SpotlightLayer } from '@/components/landing/SpotlightLayer'
 import { StepsToScore } from '@/components/landing/StepsToScore'
 import { WeightBreakdown } from '@/components/landing/WeightBreakdown'
 import { Logo } from '@/components/Logo'
@@ -260,6 +261,7 @@ function Hero() {
     // disappear entirely.
     <section className="relative isolate overflow-hidden border-b border-border">
       <HeroMesh />
+      <div className="mk-grid" aria-hidden="true" />
       <div className="mx-auto max-w-6xl px-6 py-24 sm:py-32">
         <Stagger trigger="mount" className="mx-auto max-w-3xl text-center">
           <StaggerItem>
@@ -345,7 +347,7 @@ function HowItWorks() {
         <Stagger className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
           {METHOD.map((step, index) => (
             <StaggerItem key={step.title}>
-              <Card className="mk-lift h-full">
+              <Card className="mk-lift mk-spotlight h-full">
                 <CardContent className="space-y-3 p-5">
                   <span className="inline-flex size-8 items-center justify-center rounded-lg bg-primary/12 text-sm font-semibold text-primary">
                     {index + 1}
@@ -380,7 +382,7 @@ function Pillars() {
             const Icon = PILLAR_ICONS[pillar.key] ?? Gauge
             return (
               <StaggerItem key={pillar.key}>
-                <Card className="mk-lift h-full">
+                <Card className="mk-lift mk-spotlight h-full">
                   <CardContent className="space-y-3 p-5">
                     <div className="flex items-start justify-between gap-3">
                       <span className="inline-flex size-9 items-center justify-center rounded-lg bg-primary/12 text-primary">
@@ -479,7 +481,7 @@ function Byok() {
         <Stagger className="grid gap-4 sm:grid-cols-2">
           {points.map((point) => (
             <StaggerItem key={point.title}>
-              <Card className="mk-lift h-full">
+              <Card className="mk-lift mk-spotlight h-full">
                 <CardContent className="space-y-2 p-5">
                   <point.icon className="size-4.5 text-primary" aria-hidden="true" />
                   <h3 className="text-sm font-medium">{point.title}</h3>
@@ -630,6 +632,7 @@ export default function Landing() {
   const [sentinelRef, pastHero] = useScrolledPast<HTMLDivElement>()
 
   return (
+    <SpotlightLayer>
     <div className="mk-surface min-h-screen bg-background">
       <a
         href="#main"
@@ -652,5 +655,6 @@ export default function Landing() {
       </main>
       <Footer />
     </div>
+    </SpotlightLayer>
   )
 }

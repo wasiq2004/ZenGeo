@@ -305,7 +305,66 @@
   }
 }
 
+/* Cursor spotlight.
+   A soft light that follows the pointer across a card, the same trick
+   zenautomations.in uses: JS writes --mx/--my in pixels, CSS draws a radial
+   gradient there. Only the two custom properties change, so the browser
+   repaints a compositor layer rather than re-running layout.
+
+   ::before rather than a real element - one less node per card, and it cannot
+   catch pointer events and break the hover it depends on. */
+.mk-spotlight {
+  position: relative;
+  isolation: isolate;
+}
+.mk-spotlight::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  opacity: 0;
+  transition: opacity 0.35s var(--mk-ease);
+  background: radial-gradient(
+    16rem circle at var(--mx, 50%) var(--my, 50%),
+    color-mix(in srgb, var(--mk-cyan) 16%, transparent),
+    transparent 60%
+  );
+}
+.mk-spotlight:hover::before {
+  opacity: 1;
+}
+:root[data-theme='dark'] .mk-spotlight::before,
+.dark .mk-spotlight::before {
+  background: radial-gradient(
+    16rem circle at var(--mx, 50%) var(--my, 50%),
+    color-mix(in srgb, var(--mk-cyan) 22%, transparent),
+    transparent 60%
+  );
+}
+
+/* Ambient grid. Two hairline gradients rather than an image: no request, no
+   raster, and it re-tints itself from the ink token in either theme. Masked so
+   it fades out before it reaches the content it sits behind. */
+.mk-grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(to right, rgb(var(--hairline) / 0.055) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(var(--hairline) / 0.055) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, #000 40%, transparent 75%);
+  -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, #000 40%, transparent 75%);
+}
+
 @media (prefers-reduced-motion: reduce) {
+  /* A light that chases the cursor is motion even though no keyframe drives
+     it, so shortening durations would not remove it. Switched off outright. */
+  .mk-spotlight::before {
+    display: none;
+  }
+
   *,
   *::before,
   *::after {
