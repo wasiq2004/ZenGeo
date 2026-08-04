@@ -9,7 +9,7 @@ from app.db.models.analytics import AdminAuditLog, KpiSnapshot
 from app.db.models.audit import Audit, AuditEvent, AuditStatus
 from app.db.models.business import Business
 from app.db.models.llm_key import LLMApiKey, LLMProviderName
-from app.db.models.user import RefreshToken, TokenPurpose, User, UserRole, UserToken
+from app.db.models.user import RefreshToken, User, UserRole
 
 __all__ = [
     "AdminAuditLog",
@@ -22,8 +22,6 @@ __all__ = [
     "LLMApiKey",
     "LLMProviderName",
     "RefreshToken",
-    "TokenPurpose",
     "User",
     "UserRole",
-    "UserToken",
 ]

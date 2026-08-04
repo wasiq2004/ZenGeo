@@ -35,11 +35,6 @@ class UserRole(enum.StrEnum):
     admin = "admin"
 
 
-class TokenPurpose(enum.StrEnum):
-    email_verification = "email_verification"
-    password_reset = "password_reset"  # noqa: S105 - an enum label, not a secret
-
-
 class User(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "users"
 
@@ -106,21 +101,3 @@ class RefreshToken(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         Index("ix_refresh_tokens_user_id", "user_id"),
         Index("ix_refresh_tokens_family_id", "family_id"),
     )
-
-
-class UserToken(Base, UUIDPrimaryKeyMixin, TimestampMixin):
-    """Single-use, short-lived tokens for email verification / password reset."""
-
-    __tablename__ = "user_tokens"
-
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
-    )
-    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
-    purpose: Mapped[TokenPurpose] = mapped_column(
-        Enum(TokenPurpose, name="token_purpose", native_enum=True), nullable=False
-    )
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-
-    __table_args__ = (Index("ix_user_tokens_user_id_purpose", "user_id", "purpose"),)
