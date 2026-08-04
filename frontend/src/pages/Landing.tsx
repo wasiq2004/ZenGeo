@@ -9,7 +9,9 @@ import {
   Link2,
   ListChecks,
   Lock,
+  Mail,
   Menu,
+  Phone,
   Quote,
   Radar,
   ShieldCheck,
@@ -22,7 +24,9 @@ import { Link } from 'react-router-dom'
 import { AssistantMarquee } from '@/components/landing/AssistantMarquee'
 import { PreviewStats, ScorePreview } from '@/components/landing/ScorePreview'
 import { StepsToScore } from '@/components/landing/StepsToScore'
+import { WeightBreakdown } from '@/components/landing/WeightBreakdown'
 import { Logo } from '@/components/Logo'
+import { CONTACT } from '@/lib/contact'
 import { Reveal, Stagger, StaggerItem } from '@/components/motion/Reveal'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { Badge } from '@/components/ui/badge'
@@ -45,42 +49,42 @@ const PILLAR_ICONS: Record<string, typeof Bot> = {
 const METHOD = [
   {
     title: 'Describe your business',
-    body: 'A short guided form: who you are, what you sell, who you compete with, and the questions your customers would actually type into an AI assistant.',
+    body: 'A short guided form: what you sell, who you compete with, and the questions your customers would type into an assistant.',
   },
   {
     title: 'We scan your site',
-    body: 'Six automated pillars run against your live pages — robots.txt and AI bot rules, llms.txt, JSON-LD schema, content structure, evidence density and entity signals.',
+    body: 'Six automated pillars run against your live pages — bot rules, llms.txt, schema, structure, evidence and entity signals.',
   },
   {
     title: 'We test the assistants',
-    body: 'Connect your own OpenAI, Anthropic or Perplexity key and your target prompts are run for real. We record whether you were mentioned, cited, and who showed up instead.',
+    body: 'Your prompts are run for real. We record whether you were mentioned, cited, and who showed up instead.',
   },
   {
     title: 'You get a plan',
-    body: 'A 0–100 score with a per-pillar breakdown, plus prioritised fixes split into quick wins, medium effort and strategic work. Downloadable as a PDF.',
+    body: 'A 0–100 score, a per-pillar breakdown, and prioritised fixes ranked by impact. Downloadable as a PDF.',
   },
 ]
 
 const FAQ = [
   {
     q: 'What is GEO, and how is it different from SEO?',
-    a: 'SEO optimises for a ranked list of links. Generative Engine Optimisation optimises for being the source an AI assistant reads, trusts and cites inside a written answer. The signals overlap but are not the same: an assistant cares about machine-readable facts, extractable structure and verifiable evidence far more than it cares about keyword density.',
+    a: 'SEO optimises for a ranked list of links. GEO optimises for being the source an assistant reads, trusts and cites inside a written answer — which rewards machine-readable facts and verifiable evidence far more than keyword density.',
   },
   {
     q: 'Why do I need to bring my own API key?',
-    a: 'The Share of Voice pillar sends your target prompts to real assistants. Running that on shared platform keys would mean either charging you or capping you. Using your own key keeps the tool free, keeps your prompts on your own account, and means nobody imposes a limit on how many prompts or providers you test.',
+    a: 'Share of Voice sends your prompts to real assistants. Using your own key keeps the tool free, keeps your prompts on your own account, and means nobody caps how much you test.',
   },
   {
     q: 'Is my API key safe?',
-    a: 'Keys are encrypted before they touch the database and are decrypted only in memory, inside the process making your audit call. They are never written to logs, never returned to the browser after you save them, and never visible to anyone else — administrators included. You can delete a key permanently at any time.',
+    a: 'Keys are encrypted before they reach the database and decrypted only in memory, for your audit call. They are never logged, never returned to the browser, and not visible to anyone — administrators included.',
   },
   {
     q: 'What if I do not connect a key?',
-    a: 'Everything else still runs. The Share of Voice pillar is skipped and its 15% weight is redistributed proportionally across the other six, so your score stays on the same 0–100 scale. The report says plainly that the pillar was not tested.',
+    a: 'Everything else still runs. Share of Voice is skipped and its 15% is redistributed across the other six, so your score stays on a true 0–100 scale — and the report says so.',
   },
   {
     q: 'How long does an audit take?',
-    a: 'The automated pillars usually finish in under a minute. Share of Voice depends on how many prompts and providers you chose — each call is queued at a safe rate so no provider throttles you.',
+    a: 'The automated pillars finish in under a minute. Share of Voice depends on how many prompts and providers you chose.',
   },
 ]
 
@@ -367,8 +371,7 @@ function Pillars() {
             Seven weighted pillars
           </h2>
           <p className="mt-3 text-pretty text-muted-foreground">
-            Each pillar is scored 0–100 on its own, then combined by weight into your composite
-            GEO score. You always see the sub-scores, so you know which lever to pull.
+            Scored 0–100 each, then combined by weight. You always see the sub-scores.
           </p>
         </Reveal>
 
@@ -513,19 +516,110 @@ function Faq() {
 
 function Footer() {
   return (
-    <footer className="border-t border-border py-10">
-      <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-6 sm:flex-row">
-        <Logo />
-        <p className="text-xs text-muted-foreground">
-          Self-hosted GEO auditing. Your data and your API keys stay on your own server.
-        </p>
-        <div className="flex items-center gap-4 text-xs text-muted-foreground">
-          <Link to="/login" className="transition-colors hover:text-foreground">
-            Sign in
-          </Link>
-          <Link to="/signup" className="transition-colors hover:text-foreground">
-            Create account
-          </Link>
+    <footer className="border-t border-border bg-muted/20">
+      <div className="mx-auto max-w-6xl px-6 py-14">
+        <div className="grid gap-10 lg:grid-cols-[1.6fr_repeat(3,1fr)]">
+          <div>
+            <Logo />
+            <p className="mt-4 max-w-xs text-sm leading-relaxed text-muted-foreground">
+              Measure how visible and citable your business is inside AI answers, then fix what the
+              score tells you to fix.
+            </p>
+            <div className="mt-5 space-y-2 text-sm">
+              <a
+                href={`mailto:${CONTACT.email}`}
+                className="flex items-center gap-2 text-muted-foreground transition-colors hover:text-foreground"
+              >
+                <Mail aria-hidden="true" className="size-4 shrink-0" />
+                {CONTACT.email}
+              </a>
+              <a
+                href={`tel:${CONTACT.phoneHref}`}
+                className="flex items-center gap-2 text-muted-foreground transition-colors hover:text-foreground"
+              >
+                <Phone aria-hidden="true" className="size-4 shrink-0" />
+                {CONTACT.phoneDisplay}
+              </a>
+            </div>
+          </div>
+
+          <div>
+            <h3 className="text-sm font-semibold">Product</h3>
+            <ul className="mt-4 space-y-2.5 text-sm">
+              {[
+                { label: 'How it works', href: '#how' },
+                { label: 'What we measure', href: '#pillars' },
+                { label: 'Bring your own key', href: '#byok' },
+                { label: 'Questions', href: '#faq' },
+              ].map((l) => (
+                <li key={l.href}>
+                  <a
+                    href={l.href}
+                    className="text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    {l.label}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <div>
+            <h3 className="text-sm font-semibold">Account</h3>
+            <ul className="mt-4 space-y-2.5 text-sm">
+              <li>
+                <Link
+                  to="/signup"
+                  className="text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  Create account
+                </Link>
+              </li>
+              <li>
+                <Link
+                  to="/login"
+                  className="text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  Sign in
+                </Link>
+              </li>
+              <li>
+                <a
+                  href={`mailto:${CONTACT.email}?subject=Support%20request`}
+                  className="text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  Support
+                </a>
+              </li>
+            </ul>
+          </div>
+
+          <div>
+            <h3 className="text-sm font-semibold">Legal</h3>
+            <ul className="mt-4 space-y-2.5 text-sm">
+              <li>
+                <Link
+                  to="/privacy"
+                  className="text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  Privacy policy
+                </Link>
+              </li>
+              <li>
+                <Link
+                  to="/terms"
+                  className="text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  Terms &amp; conditions
+                </Link>
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <div className="mt-12 flex flex-col gap-2 border-t border-border pt-7 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+          <span>© {new Date().getFullYear()} CheckGEO.ai. All rights reserved.</span>
+          <span>Self-hosted. Your data and your API keys stay on your own server.</span>
         </div>
       </div>
     </footer>
@@ -550,6 +644,7 @@ export default function Landing() {
         <div ref={sentinelRef} aria-hidden="true" className="h-px" />
         <AssistantMarquee />
         <HowItWorks />
+        <WeightBreakdown />
         <Pillars />
         <Byok />
         <StepsToScore />

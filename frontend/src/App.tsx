@@ -10,6 +10,10 @@ import { QueryProvider } from '@/lib/query'
 // Route-level code splitting: the marketing page should not ship the charting
 // library, and a signed-out visitor should not download the admin panel.
 const Landing = lazy(() => import('@/pages/Landing'))
+const PrivacyPolicy = lazy(() =>
+  import('@/pages/Legal').then((m) => ({ default: m.PrivacyPolicy })),
+)
+const Terms = lazy(() => import('@/pages/Legal').then((m) => ({ default: m.Terms })))
 const Login = lazy(() => import('@/pages/Login'))
 const Signup = lazy(() => import('@/pages/Signup'))
 const NotFound = lazy(() => import('@/pages/NotFound'))
@@ -41,6 +45,8 @@ export default function App() {
                 <Routes>
                   {/* Public */}
                   <Route path="/" element={<Landing />} />
+                  <Route path="/privacy" element={<PrivacyPolicy />} />
+                  <Route path="/terms" element={<Terms />} />
                   <Route
                     path="/login"
                     element={
