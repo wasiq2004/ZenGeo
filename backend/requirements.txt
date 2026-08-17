@@ -7,12 +7,12 @@
 # --- Web framework ---
 fastapi==0.141.1
 starlette==1.3.1
-uvicorn[standard]==0.52.0
+uvicorn[standard]==0.52.3
 gunicorn==26.0.0
 python-multipart==0.0.32
 
 # --- Data / ORM ---
-sqlalchemy[asyncio]==2.0.51
+sqlalchemy[asyncio]==2.0.52
 asyncpg==0.31.0
 psycopg[binary]==3.3.4
 alembic==1.18.5
